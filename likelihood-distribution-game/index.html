@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MLE Game – Find the Maximum Likelihood Mean</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0d1117;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    #game-container { cursor: ew-resize; }
+  </style>
+</head>
+<body>
+<div id="game-container"></div>
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+<script>
+// ---- Math helpers ----
+function randn() {
+  let u, v;
+  do { u = Math.random(); } while (u === 0);
+  do { v = Math.random(); } while (v === 0);
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+
+function normalPDF(x, mu, sigma) {
+  return Math.exp(-0.5 * ((x - mu) / sigma) ** 2) / (sigma * Math.sqrt(2 * Math.PI));
+}
+
+function logLikelihood(data, mu, sigma) {
+  return data.reduce((sum, x) => sum + Math.log(normalPDF(x, mu, sigma)), 0);
+}
+
+// ---- Audio (Web Audio API, no files needed) ----
+let audioCtx = null;
+function getCtx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+
+function playTone(freq, dur, type = 'sine', vol = 0.25) {
+  const ctx = getCtx();
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.type = type;
+  osc.frequency.value = freq;
+  gain.gain.setValueAtTime(vol, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
+  osc.start(ctx.currentTime);
+  osc.stop(ctx.currentTime + dur);
+}
+
+function playProximityTone(proximity) {
+  if (proximity < 0.25) return;
+  playTone(200 + proximity * 500, 0.08, 'sine', 0.12 * proximity);
+}
+
+function playWinSound() {
+  [523.25, 659.25, 783.99, 1046.50].forEach((f, i) =>
+    setTimeout(() => playTone(f, 0.35, 'sine', 0.35), i * 130)
+  );
+}
+
+// ---- Phaser Scene ----
+class MLEScene extends Phaser.Scene {
+  constructor() { super({ key: 'MLEScene' }); }
+
+  create() {
+    this.W = this.scale.width;
+    this.H = this.scale.height;
+
+    // Plot area margins
+    this.px = 72;
+    this.py = 68;
+    this.pw = this.W - 144;
+    this.ph = this.H - 190;
+
+    this.won = false;
+    this.lastSoundMs = 0;
+    this.dragStartX = null;
+    this.dragStartMu = null;
+
+    this.setupData();
+
+    // Graphics layers (back to front)
+    this.gBg        = this.add.graphics();
+    this.gHist      = this.add.graphics();
+    this.gGlow      = this.add.graphics();
+    this.gCurve     = this.add.graphics();
+    this.gMeanLine  = this.add.graphics();
+
+    this.setupUI();
+    this.setupInput();
+    this.redraw();
+  }
+
+  // ---- Data generation ----
+  setupData() {
+    const trueMu    = 20 + Math.random() * 60;   // 20–80
+    const trueSigma = 4  + Math.random() * 10;   // 4–14
+    this.data = Array.from({ length: 50 }, () => trueMu + trueSigma * randn());
+
+    // MLE estimates
+    this.mleMu = this.data.reduce((a, b) => a + b) / this.data.length;
+    this.mleSigma = Math.sqrt(
+      this.data.reduce((s, x) => s + (x - this.mleMu) ** 2, 0) / this.data.length
+    );
+
+    // x-axis range
+    const dMin = Math.min(...this.data);
+    const dMax = Math.max(...this.data);
+    const pad  = (dMax - dMin) * 0.18;
+    this.xMin  = dMin - pad;
+    this.xMax  = dMax + pad;
+    this.xRange = this.xMax - this.xMin;
+
+    // Histogram bins
+    this.nBins  = 10;
+    this.binW   = this.xRange / this.nBins;
+    this.counts = new Array(this.nBins).fill(0);
+    this.data.forEach(x => {
+      const i = Phaser.Math.Clamp(Math.floor((x - this.xMin) / this.binW), 0, this.nBins - 1);
+      this.counts[i]++;
+    });
+    this.maxCount = Math.max(...this.counts);
+
+    // Start user mean off by 1–2 sigma in a random direction
+    const offset = this.mleSigma * (1 + Math.random()) * (Math.random() < 0.5 ? 1 : -1);
+    this.userMu = Phaser.Math.Clamp(
+      this.mleMu + offset,
+      this.xMin + this.xRange * 0.05,
+      this.xMax - this.xRange * 0.05
+    );
+  }
+
+  // ---- UI text & button ----
+  setupUI() {
+    const W = this.W, H = this.H;
+
+    this.add.text(W / 2, 10, 'Find the Maximum Likelihood Mean', {
+      fontSize: '21px', color: '#ccd6f6', fontStyle: 'bold', fontFamily: 'Arial'
+    }).setOrigin(0.5, 0);
+
+    this.add.text(W / 2, 38, 'Drag the curve left or right — maximise the log-likelihood', {
+      fontSize: '13px', color: '#8892b0', fontFamily: 'Arial'
+    }).setOrigin(0.5, 0);
+
+    this.llText = this.add.text(W / 2, H - 108, '', {
+      fontSize: '15px', color: '#64ffda', fontFamily: 'Arial'
+    }).setOrigin(0.5, 0);
+
+    this.muText = this.add.text(W / 2, H - 84, '', {
+      fontSize: '13px', color: '#ffd700', fontFamily: 'Arial'
+    }).setOrigin(0.5, 0);
+
+    this.hintText = this.add.text(W / 2, H - 58, '← → arrow keys also work', {
+      fontSize: '11px', color: '#445566', fontFamily: 'Arial'
+    }).setOrigin(0.5, 0);
+
+    // Win banner
+    this.winText = this.add.text(W / 2, H / 2 - 30, 'Maximum Likelihood Found!', {
+      fontSize: '30px', color: '#ffd700', fontStyle: 'bold', fontFamily: 'Arial',
+      stroke: '#000', strokeThickness: 5
+    }).setOrigin(0.5).setAlpha(0).setDepth(20);
+
+    // New Game button
+    const btn = this.add.rectangle(W - 62, H - 24, 108, 28, 0x1e3a5f).setInteractive().setDepth(10);
+    btn.on('pointerover', () => btn.setFillStyle(0x2a5298));
+    btn.on('pointerout',  () => btn.setFillStyle(0x1e3a5f));
+    btn.on('pointerdown', () => this.newGame());
+    this.add.text(W - 62, H - 24, 'New Game', {
+      fontSize: '13px', color: '#90caf9', fontFamily: 'Arial'
+    }).setOrigin(0.5).setDepth(11);
+  }
+
+  // ---- Input ----
+  setupInput() {
+    this.input.on('pointerdown', p => {
+      // Resume audio context on first interaction (browser policy)
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+      this.dragStartX  = p.x;
+      this.dragStartMu = this.userMu;
+    });
+
+    this.input.on('pointermove', p => {
+      if (this.dragStartX === null) return;
+      const dx = p.x - this.dragStartX;
+      this.userMu = Phaser.Math.Clamp(
+        this.dragStartMu + dx * (this.xRange / this.pw),
+        this.xMin, this.xMax
+      );
+      this.onMoved();
+    });
+
+    this.input.on('pointerup', () => { this.dragStartX = null; });
+
+    this._keys = this.input.keyboard.createCursorKeys();
+  }
+
+  onMoved() {
+    const now = Date.now();
+    if (now - this.lastSoundMs > 120) {
+      playProximityTone(this.proximity());
+      this.lastSoundMs = now;
+    }
+    this.checkWin();
+    this.redraw();
+  }
+
+  // ---- Proximity 0 (far) → 1 (exact) ----
+  proximity() {
+    return Math.max(0, 1 - Math.abs(this.userMu - this.mleMu) / (this.xRange * 0.08));
+  }
+
+  checkWin() {
+    const relErr = Math.abs(this.userMu - this.mleMu) / Math.abs(this.mleMu);
+    if (relErr <= 0.01 && !this.won) {
+      this.won = true;
+      playWinSound();
+      this.winText.setAlpha(1);
+      this.tweens.add({ targets: this.winText, alpha: 0, delay: 3200, duration: 900 });
+    }
+  }
+
+  // ---- Coordinate helpers ----
+  dataX(v)     { return this.px + (v - this.xMin) / this.xRange * this.pw; }
+  dataY(count) { return this.py + this.ph - (count / this.maxCount) * this.ph * 0.88; }
+
+  // ---- Drawing ----
+  redraw() {
+    this.drawBg();
+    this.drawHistogram();
+    this.drawCurve();
+    this.updateText();
+  }
+
+  drawBg() {
+    const g = this.gBg;
+    g.clear();
+    g.fillStyle(0x080c14, 1);
+    g.fillRect(this.px, this.py, this.pw, this.ph);
+    g.lineStyle(1, 0x233554, 1);
+    g.strokeRect(this.px, this.py, this.pw, this.ph);
+    // Horizontal grid
+    g.lineStyle(1, 0x1a2744, 0.5);
+    for (let i = 1; i < 4; i++) {
+      const y = this.py + (i / 4) * this.ph;
+      g.lineBetween(this.px, y, this.px + this.pw, y);
+    }
+    // x-axis tick labels
+    const nTicks = 5;
+    for (let i = 0; i <= nTicks; i++) {
+      const val = this.xMin + (i / nTicks) * this.xRange;
+      const px  = this.dataX(val);
+      g.lineStyle(1, 0x334466, 0.7);
+      g.lineBetween(px, this.py + this.ph, px, this.py + this.ph + 5);
+    }
+  }
+
+  drawHistogram() {
+    const g = this.gHist;
+    g.clear();
+    const pxBw = this.pw / this.nBins;
+    for (let i = 0; i < this.nBins; i++) {
+      if (this.counts[i] === 0) continue;
+      const x    = this.px + i * pxBw;
+      const barH = (this.counts[i] / this.maxCount) * this.ph * 0.88;
+      const y    = this.py + this.ph - barH;
+      g.fillStyle(0x1e4080, 0.88);
+      g.fillRect(x + 1, y, pxBw - 2, barH);
+      g.lineStyle(1, 0x4a90d9, 0.65);
+      g.strokeRect(x + 1, y, pxBw - 2, barH);
+    }
+  }
+
+  drawCurve() {
+    const prox = this.proximity();
+    const won  = this.won;
+
+    // Colour: cold blue → warm green → gold
+    let col;
+    if (won) {
+      col = 0xffd700;
+    } else {
+      const r = Math.floor(Phaser.Math.Clamp(0.05 + prox * 0.85, 0, 1) * 255);
+      const g = Math.floor(Phaser.Math.Clamp(0.25 + prox * 0.65, 0, 1) * 255);
+      const b = Math.floor(Phaser.Math.Clamp(0.95 - prox * 0.55, 0, 1) * 255);
+      col = (r << 16) | (g << 8) | b;
+    }
+
+    // Build 300-point curve
+    const pts = [];
+    for (let i = 0; i <= 300; i++) {
+      const x    = this.xMin + (i / 300) * this.xRange;
+      const dens = normalPDF(x, this.userMu, this.mleSigma);
+      pts.push({ x: this.dataX(x), y: this.dataY(dens * this.data.length * this.binW) });
+    }
+
+    // Glow when proximity > 0.45 (or won)
+    this.gGlow.clear();
+    if (prox > 0.45 || won) {
+      const strength = won ? 1 : (prox - 0.45) / 0.55;
+      [[14, 0.09], [8, 0.14], [4, 0.18]].forEach(([w, a]) => {
+        this.gGlow.lineStyle(w, col, a * strength);
+        this.gGlow.strokePoints(pts, false);
+      });
+    }
+
+    // Main curve
+    this.gCurve.clear();
+    this.gCurve.lineStyle(won ? 3 : 2, col, 1);
+    this.gCurve.strokePoints(pts, false);
+
+    // Vertical mean indicator
+    this.gMeanLine.clear();
+    const mx = this.dataX(this.userMu);
+    this.gMeanLine.lineStyle(1, col, 0.45);
+    this.gMeanLine.lineBetween(mx, this.py, mx, this.py + this.ph);
+
+    // After win: show true MLE line in white
+    if (won) {
+      const mlx = this.dataX(this.mleMu);
+      this.gMeanLine.lineStyle(1, 0xffffff, 0.3);
+      this.gMeanLine.lineBetween(mlx, this.py, mlx, this.py + this.ph);
+    }
+  }
+
+  updateText() {
+    const ll    = logLikelihood(this.data, this.userMu, this.mleSigma);
+    const maxLL = logLikelihood(this.data, this.mleMu, this.mleSigma);
+    this.llText.setText(
+      `Log-likelihood: ${ll.toFixed(2)}   (maximum possible: ${maxLL.toFixed(2)})`
+    );
+    const wonSuffix = this.won ? `   ✓  MLE = ${this.mleMu.toFixed(3)}` : '';
+    this.muText.setText(`Your mean: ${this.userMu.toFixed(3)}${wonSuffix}`);
+  }
+
+  newGame() {
+    this.won = false;
+    this.winText.setAlpha(0);
+    this.gGlow.setAlpha(1);
+    this.setupData();
+    this.redraw();
+  }
+
+  // ---- Game loop ----
+  update(time) {
+    const step = this.xRange / this.pw * 1.8;
+    let moved = false;
+    if (this._keys.left.isDown)  { this.userMu = Math.max(this.xMin, this.userMu - step); moved = true; }
+    if (this._keys.right.isDown) { this.userMu = Math.min(this.xMax, this.userMu + step); moved = true; }
+    if (moved) this.onMoved();
+
+    // Pulse glow on win
+    if (this.won) {
+      this.gGlow.setAlpha(0.6 + 0.4 * Math.sin(time * 0.004));
+    }
+  }
+}
+
+// ---- Phaser config ----
+new Phaser.Game({
+  type: Phaser.AUTO,
+  width: 820,
+  height: 520,
+  backgroundColor: '#0d1117',
+  scene: MLEScene,
+  parent: 'game-container',
+  resolution: window.devicePixelRatio || 1,
+  scale: {
+    mode: Phaser.Scale.FIT,
+    autoCenter: Phaser.Scale.CENTER_BOTH
+  }
+});
+</script>
+</body>
+</html>
