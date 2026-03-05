@@ -1,0 +1,934 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fish Tank Experiment — Experimental Design</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0d1117;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    #gc { cursor: default; }
+  </style>
+</head>
+<body>
+<div id="gc"></div>
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+<script>
+// ── Math helpers ─────────────────────────────────────────────────────────────
+
+function randn() {
+  let u, v;
+  do { u = Math.random(); } while (u === 0);
+  do { v = Math.random(); } while (v === 0);
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+
+// Two-tailed t-critical, α=0.05, df=1..20; z=1.96 for df≥21
+const T_TABLE = [0,12.706,4.303,3.182,2.776,2.571,2.447,2.365,2.306,2.262,
+                 2.228,2.201,2.179,2.160,2.145,2.131,2.120,2.110,2.101,2.093,2.086];
+function tCrit(df) {
+  if (df <= 0) return NaN;
+  return df <= 20 ? T_TABLE[df] : 1.96;
+}
+
+// True treatment means (hidden from students)
+const MU_A = 5.0, MU_B = 3.0, BETA = 2.0, SIGMA = 0.8;
+const NCOLS = 5, NROWS = 3;
+
+function simulateData(tanks) {
+  tanks.forEach(t => {
+    const mu = t.treatment === 'A' ? MU_A : MU_B;
+    const gradient = BETA * (1 - t.colNorm); // colNorm 0=door, 1=window
+    t.fishFCRs = [];
+    for (let i = 0; i < t.sampleSize; i++) {
+      t.fishFCRs.push(Math.max(0.5, mu + gradient + randn() * SIGMA));
+    }
+    t.tankMeanFCR = t.fishFCRs.reduce((a, b) => a + b, 0) / t.fishFCRs.length;
+  });
+}
+
+function summarise(tanks) {
+  const result = {};
+  ['A', 'B'].forEach(tr => {
+    const sub = tanks.filter(t => t.treatment === tr);
+    if (sub.length === 0) { result[tr] = { n: 0, mean: null, se: null, ci_lo: null, ci_hi: null }; return; }
+    const means = sub.map(t => t.tankMeanFCR);
+    const n = means.length;
+    const mean = means.reduce((a, b) => a + b, 0) / n;
+    if (n === 1) { result[tr] = { n, mean, se: null, ci_lo: null, ci_hi: null }; return; }
+    const variance = means.reduce((s, x) => s + (x - mean) ** 2, 0) / (n - 1);
+    const se = Math.sqrt(variance / n);
+    const tc = tCrit(n - 1);
+    result[tr] = { n, mean, se, ci_lo: mean - tc * se, ci_hi: mean + tc * se };
+  });
+  return result;
+}
+
+function computeCost(tanks) {
+  return tanks.reduce((s, t) => s + 100 + 10 * t.sampleSize, 0);
+}
+
+// Safely lighten a packed hex color integer
+function lightenColor(c) {
+  const r = Math.min(255, ((c >> 16) & 0xff) + 40);
+  const g = Math.min(255, ((c >> 8)  & 0xff) + 40);
+  const b = Math.min(255, ( c        & 0xff) + 40);
+  return (r << 16) | (g << 8) | b;
+}
+
+// ── Layout constants ──────────────────────────────────────────────────────────
+
+const W = 1100, H = 700;
+const HEADER_H = 60;
+const PANEL_X = 790, PANEL_W = 310;
+const ROOM_W = 780, ROOM_Y = HEADER_H;
+
+// Grid
+const CELL_W = Math.floor((ROOM_W - 80) / NCOLS);   // ~140
+const CELL_H = Math.floor((H - ROOM_Y - 60) / NROWS); // ~183
+const GRID_LEFT = 50;
+const GRID_TOP = ROOM_Y + 50;
+
+// Tank visual size within cell
+const TANK_W = CELL_W - 22;
+const TANK_H = CELL_H - 34;
+
+// ── Color palette ─────────────────────────────────────────────────────────────
+const COL = {
+  bg:             0x1a2e3d,
+  header:         0x0f1f2d,
+  panel:          0x243447,
+  wall:           0x2d4a5e,
+  floor_c:        0x1e3548,
+  door:           0x8B6914,
+  grid_line:      0x3a5a70,
+  tank_water:     0x0d3d5e,
+  fish_unassigned:0x64B5F6,
+  fish_A:         0x4CAF50,
+  fish_B:         0xFF9800,
+  btn_primary:    0x1565C0,
+  btn_disabled:   0x455A64,
+  btn_run:        0x2E7D32,
+  btn_analyse:    0x6A1B9A,
+  btn_reset:      0x4E342E,
+  text_main:      '#E0F2FE',
+  text_dim:       '#78909C',
+  text_A:         '#4CAF50',
+  text_B:         '#FF9800',
+};
+
+// ── Scene ─────────────────────────────────────────────────────────────────────
+
+class FishTankScene extends Phaser.Scene {
+  constructor() { super({ key: 'FishTankScene' }); }
+
+  create() {
+    this.tanks      = [];
+    this.sampleSize = 5;
+    this.phase      = null;
+    this.phaseUI    = null;
+    this.runElapsed = 0;
+    this.RUN_DURATION = 4000;
+
+    // Permanent layers (survive phase transitions)
+    this.roomGfx       = this.add.graphics();
+    this.tankContainer = this.add.container(0, 0);
+    this.headerGfx     = this.add.graphics();
+    this.headerText    = this.add.text(20, 18, '', {
+      font: 'bold 18px monospace', fill: COL.text_main
+    });
+
+    this.drawRoom();
+    this.setPhase('SETUP');
+  }
+
+  // ── Room ──────────────────────────────────────────────────────────────────────
+
+  drawRoom() {
+    const g = this.roomGfx;
+    g.clear();
+
+    // Full background
+    g.fillStyle(COL.bg); g.fillRect(0, 0, W, H);
+
+    // Header bg
+    g.fillStyle(COL.header); g.fillRect(0, 0, W, HEADER_H);
+
+    // Wall
+    g.fillStyle(COL.wall); g.fillRect(0, ROOM_Y, ROOM_W, H - ROOM_Y);
+
+    // Floor strip
+    g.fillStyle(COL.floor_c); g.fillRect(0, H - 38, ROOM_W, 38);
+
+    // Door (left)
+    const dX = 4, dY = ROOM_Y + 55, dW = 40, dH = 165;
+    g.fillStyle(COL.door); g.fillRect(dX, dY, dW, dH);
+    g.lineStyle(3, 0x5D3A00); g.strokeRect(dX, dY, dW, dH);
+    g.fillStyle(0xFFD700); g.fillCircle(dX + dW - 8, dY + dH / 2, 5);
+
+    // Window (right)
+    const wX = ROOM_W - 48, wY = ROOM_Y + 55, wW = 40, wH = 120;
+    g.fillStyle(0xB3E5FC, 0.55); g.fillRect(wX, wY, wW, wH);
+    g.lineStyle(3, 0x5D8AA8); g.strokeRect(wX, wY, wW, wH);
+    g.lineStyle(2, 0x5D8AA8);
+    g.beginPath(); g.moveTo(wX + wW/2, wY); g.lineTo(wX + wW/2, wY + wH); g.strokePath();
+    g.beginPath(); g.moveTo(wX, wY + wH/2); g.lineTo(wX + wW, wY + wH/2); g.strokePath();
+
+    // Side labels
+    this.add.text(dX + dW + 4, dY + 80, '← DOOR\n(warm)', { font: '11px monospace', fill: '#FF8A65', align:'center' });
+    this.add.text(wX - 68, wY + 40, 'WINDOW→\n(cool)', { font: '11px monospace', fill: '#81D4FA', align:'center' });
+
+    // Grid cell borders
+    g.lineStyle(1, COL.grid_line, 0.45);
+    for (let r = 0; r < NROWS; r++) {
+      for (let c = 0; c < NCOLS; c++) {
+        const cx = GRID_LEFT + c * CELL_W, cy = GRID_TOP + r * CELL_H;
+        g.strokeRect(cx, cy, CELL_W, CELL_H);
+      }
+    }
+
+    // Column gradient arrow at bottom of room
+    const arrY = H - 20;
+    g.lineStyle(2, 0x546E7A, 0.8);
+    g.beginPath(); g.moveTo(GRID_LEFT, arrY); g.lineTo(GRID_LEFT + NCOLS * CELL_W, arrY); g.strokePath();
+    this.add.text(GRID_LEFT, arrY - 14, 'Higher FCR (hidden) →                                   ← Lower FCR (hidden)',
+      { font: '10px monospace', fill: '#546E7A' });
+
+    // Panel background
+    g.fillStyle(COL.panel); g.fillRect(PANEL_X, ROOM_Y, PANEL_W, H - ROOM_Y);
+    g.lineStyle(2, 0x3a5a70); g.strokeRect(PANEL_X, ROOM_Y, PANEL_W, H - ROOM_Y);
+  }
+
+  // ── Phase management ──────────────────────────────────────────────────────────
+
+  setPhase(phase) {
+    if (this.phaseUI) { this.phaseUI.destroy(true); this.phaseUI = null; }
+    this.phase = phase;
+    this.phaseUI = this.add.container(0, 0);
+
+    const showRoom = ['SETUP','ASSIGN','RUN'].includes(phase);
+    this.roomGfx.setVisible(showRoom);
+    this.tankContainer.setVisible(showRoom);
+
+    this.updateHeader();
+    this[`buildPhase_${phase}`]();
+  }
+
+  updateHeader() {
+    const labels = {
+      SETUP:    '1. SETUP — Click cells to place fish tanks',
+      ASSIGN:   '2. ASSIGN — Click tanks to toggle diet A / B',
+      RUN:      '3. RUN — Experiment in progress…',
+      RESULTS:  '4. RESULTS — Food Conversion Ratios',
+      ANALYSIS: '5. ANALYSIS — Treatment Comparison',
+    };
+    this.headerText.setText(labels[this.phase] || '');
+
+    this.headerGfx.clear();
+    this.headerGfx.fillStyle(COL.header);
+    this.headerGfx.fillRect(0, 0, W, HEADER_H);
+
+    // Phase progress dots
+    const phases = ['SETUP','ASSIGN','RUN','RESULTS','ANALYSIS'];
+    const idx = phases.indexOf(this.phase);
+    phases.forEach((p, i) => {
+      const x = W - 155 + i * 28, y = HEADER_H / 2;
+      const done = i < idx, active = i === idx;
+      this.headerGfx.fillStyle(done ? 0x4CAF50 : (active ? 0x1976D2 : 0x37474F));
+      this.headerGfx.fillCircle(x, y, active ? 9 : 6);
+    });
+  }
+
+  // ── Cell / tank helpers ───────────────────────────────────────────────────────
+
+  cellXY(col, row) {
+    return {
+      x: GRID_LEFT + col * CELL_W + CELL_W / 2,
+      y: GRID_TOP  + row * CELL_H + CELL_H / 2,
+    };
+  }
+
+  tankAt(col, row) {
+    return this.tanks.find(t => t.col === col && t.row === row) || null;
+  }
+
+  // ── Tank drawing ──────────────────────────────────────────────────────────────
+
+  // Called ONLY from redrawAllTanks(), after tankContainer has been cleared.
+  drawTank(tank) {
+    const { x, y } = this.cellXY(tank.col, tank.row);
+    tank.cellX = x; tank.cellY = y;
+
+    const fishColor = tank.treatment === 'A' ? COL.fish_A
+                    : tank.treatment === 'B' ? COL.fish_B
+                    : COL.fish_unassigned;
+
+    // Water + glass border
+    const g = this.add.graphics();
+    g.fillStyle(COL.tank_water, 0.85);
+    g.fillRect(x - TANK_W/2, y - TANK_H/2, TANK_W, TANK_H);
+    g.lineStyle(3, fishColor, 0.9);
+    g.strokeRect(x - TANK_W/2, y - TANK_H/2, TANK_W, TANK_H);
+    tank.gfx = g;
+    this.tankContainer.add(g);
+
+    // Fish sprites
+    tank.fishGfx = []; tank.fishPhase = [];
+    const cols_f = Math.min(tank.sampleSize, 4);
+    const rows_f = Math.ceil(tank.sampleSize / cols_f);
+    const fw = (TANK_W - 16) / cols_f;
+    const fh = (TANK_H - 16) / rows_f;
+    const fishW = Math.min(fw * 0.68, 28);
+    const fishH = Math.min(fh * 0.52, 16);
+    for (let i = 0; i < tank.sampleSize; i++) {
+      const fc = i % cols_f, fr = Math.floor(i / cols_f);
+      const fx = x - TANK_W/2 + 8 + fw * (fc + 0.5);
+      const fy = y - TANK_H/2 + 8 + fh * (fr + 0.5);
+      const fg = this.add.graphics();
+      fg.x = fx; fg.y = fy;
+      this.drawFishShape(fg, 0, 0, fishW, fishH, fishColor);
+      tank.fishGfx.push(fg);
+      tank.fishPhase.push(Math.random() * Math.PI * 2);
+      this.tankContainer.add(fg);
+    }
+
+    // Treatment badge (circle with letter)
+    if (tank.treatment) {
+      const bg = this.add.graphics();
+      const bx = x + TANK_W/2 - 12, by = y - TANK_H/2 + 12;
+      const bc = tank.treatment === 'A' ? COL.fish_A : COL.fish_B;
+      bg.fillStyle(bc); bg.fillCircle(bx, by, 10);
+      bg.lineStyle(2, 0xffffff, 0.7); bg.strokeCircle(bx, by, 10);
+      tank.badgeGfx = bg;
+      this.tankContainer.add(bg);
+
+      const bt = this.add.text(bx, by, tank.treatment, {
+        font: 'bold 11px monospace', fill: '#000000'
+      }).setOrigin(0.5);
+      tank.labelText = bt;
+      this.tankContainer.add(bt);
+    }
+
+    // Labels: tank ID and N
+    const idTxt = this.add.text(x - TANK_W/2 + 3, y - TANK_H/2 + 2, `T${tank.id}`,
+      { font: '10px monospace', fill: '#546E7A' });
+    this.tankContainer.add(idTxt);
+
+    const nTxt = this.add.text(x, y + TANK_H/2 - 11, `N=${tank.sampleSize}`,
+      { font: '10px monospace', fill: '#90A4AE' }).setOrigin(0.5);
+    this.tankContainer.add(nTxt);
+  }
+
+  drawFishShape(g, cx, cy, fw, fh, color) {
+    // Body ellipse
+    g.fillStyle(color, 0.9);
+    const pts = [];
+    for (let i = 0; i < 20; i++) {
+      const a = (i / 20) * Math.PI * 2;
+      pts.push({ x: cx + Math.cos(a) * fw/2, y: cy + Math.sin(a) * fh/2 });
+    }
+    g.fillPoints(pts, true);
+    // Tail
+    g.fillStyle(color, 0.7);
+    g.fillTriangle(
+      cx - fw/2,           cy,
+      cx - fw/2 - fw*0.4,  cy - fh*0.5,
+      cx - fw/2 - fw*0.4,  cy + fh*0.5
+    );
+    // Eye
+    g.fillStyle(0xffffff); g.fillCircle(cx + fw*0.28, cy - fh*0.1, fh*0.18);
+    g.fillStyle(0x111111); g.fillCircle(cx + fw*0.30, cy - fh*0.1, fh*0.10);
+  }
+
+  redrawAllTanks() {
+    this.tankContainer.removeAll(true); // destroys all children
+    // Reset stale graphic references before re-drawing
+    this.tanks.forEach(t => {
+      t.gfx = null; t.fishGfx = []; t.fishPhase = [];
+      t.badgeGfx = null; t.labelText = null;
+      this.drawTank(t);
+    });
+  }
+
+  // ── SETUP phase ───────────────────────────────────────────────────────────────
+
+  buildPhase_SETUP() {
+    const ui = this.phaseUI;
+
+    this.hoverGfx = this.add.graphics();
+    ui.add(this.hoverGfx);
+
+    // Clickable zone per grid cell
+    for (let r = 0; r < NROWS; r++) {
+      for (let c = 0; c < NCOLS; c++) {
+        const { x, y } = this.cellXY(c, r);
+        const zone = this.add.zone(x, y, CELL_W - 4, CELL_H - 4).setInteractive();
+        zone.on('pointerover', () => { if (!this.tankAt(c, r)) this.hoverCell(c, r, true); });
+        zone.on('pointerout',  () => this.hoverCell(c, r, false));
+        zone.on('pointerdown', () => this.toggleTank(c, r));
+        ui.add(zone);
+      }
+    }
+
+    this.setupPanel = this.add.container(0, 0);
+    ui.add(this.setupPanel);
+
+    this.redrawAllTanks();
+    this.refreshSetupPanel();
+  }
+
+  hoverCell(col, row, show) {
+    if (!this.hoverGfx) return;
+    this.hoverGfx.clear();
+    if (!show) return;
+    const { x, y } = this.cellXY(col, row);
+    this.hoverGfx.lineStyle(2, 0x90CAF9, 0.8);
+    this.hoverGfx.strokeRect(x - CELL_W/2 + 2, y - CELL_H/2 + 2, CELL_W - 4, CELL_H - 4);
+  }
+
+  toggleTank(col, row) {
+    const existing = this.tankAt(col, row);
+    if (existing) {
+      this.tanks = this.tanks.filter(t => t !== existing);
+    } else {
+      const id = this.tanks.length > 0 ? Math.max(...this.tanks.map(t => t.id)) + 1 : 1;
+      this.tanks.push({
+        id, col, row,
+        colNorm: col / (NCOLS - 1),
+        sampleSize: this.sampleSize,
+        treatment: null,
+        fishFCRs: [], tankMeanFCR: null,
+        cellX: 0, cellY: 0,
+        gfx: null, fishGfx: [], fishPhase: [],
+        badgeGfx: null, labelText: null,
+      });
+    }
+    this.redrawAllTanks();
+    this.refreshSetupPanel();
+  }
+
+  refreshSetupPanel() {
+    if (!this.setupPanel) return;
+    this.setupPanel.removeAll(true);
+    const c = this.setupPanel;
+    const px = PANEL_X + 16, py = ROOM_Y + 12;
+
+    c.add(this.add.text(px, py, 'EXPERIMENT SETUP',
+      { font: 'bold 14px monospace', fill: COL.text_main }));
+
+    c.add(this.add.text(px, py + 30, [
+      'Click a cell to PLACE a tank.',
+      'Click again to REMOVE it.',
+      '',
+      'Tanks near the door may be',
+      'affected by room temperature —',
+      'but that is hidden for now!',
+    ].join('\n'), { font: '12px monospace', fill: COL.text_dim, lineSpacing: 2 }));
+
+    const cost = computeCost(this.tanks);
+    c.add(this.add.text(px, py + 148, `Tanks placed: ${this.tanks.length}`,
+      { font: '13px monospace', fill: COL.text_main }));
+    c.add(this.add.text(px, py + 168, `Budget: $${cost.toLocaleString()}`,
+      { font: 'bold 15px monospace', fill: '#FFD54F' }));
+    c.add(this.add.text(px, py + 186, '($100/tank + $10/fish)',
+      { font: '11px monospace', fill: COL.text_dim }));
+
+    // Sample-size spinner
+    c.add(this.add.text(px, py + 218, 'Fish per tank (N):',
+      { font: '13px monospace', fill: COL.text_main }));
+
+    const minusBtn = this.makeBtn(px, py + 238, '  –  ', 0x37474F, () => {
+      if (this.sampleSize > 2) {
+        this.sampleSize--;
+        this.tanks.forEach(t => t.sampleSize = this.sampleSize);
+        this.redrawAllTanks();
+        this.refreshSetupPanel();
+      }
+    }, 52);
+    c.add(minusBtn);
+
+    c.add(this.add.text(px + 60, py + 242, `${this.sampleSize}`,
+      { font: 'bold 18px monospace', fill: '#FFD54F' }));
+
+    const plusBtn = this.makeBtn(px + 84, py + 238, '  +  ', 0x37474F, () => {
+      if (this.sampleSize < 20) {
+        this.sampleSize++;
+        this.tanks.forEach(t => t.sampleSize = this.sampleSize);
+        this.redrawAllTanks();
+        this.refreshSetupPanel();
+      }
+    }, 52);
+    c.add(plusBtn);
+
+    const canAssign = this.tanks.length >= 1;
+    const assignBtn = this.makeBtn(px, py + 300,
+      ' Assign Treatments → ',
+      canAssign ? COL.btn_primary : COL.btn_disabled,
+      () => { if (canAssign) this.setPhase('ASSIGN'); }, 220);
+    c.add(assignBtn);
+
+    if (!canAssign) {
+      c.add(this.add.text(px, py + 340, 'Place ≥ 1 tank to continue',
+        { font: '11px monospace', fill: '#EF9A9A' }));
+    }
+  }
+
+  // ── ASSIGN phase ──────────────────────────────────────────────────────────────
+
+  buildPhase_ASSIGN() {
+    const ui = this.phaseUI;
+
+    this.hoverGfx = this.add.graphics();
+    ui.add(this.hoverGfx);
+
+    // Default: alternate A/B if all unassigned
+    if (this.tanks.every(t => t.treatment === null)) {
+      this.tanks.forEach((t, i) => { t.treatment = i % 2 === 0 ? 'A' : 'B'; });
+    }
+    this.redrawAllTanks();
+
+    for (const tank of this.tanks) {
+      const { x, y } = this.cellXY(tank.col, tank.row);
+      const zone = this.add.zone(x, y, CELL_W - 4, CELL_H - 4).setInteractive();
+      zone.on('pointerover', () => this.hoverCell(tank.col, tank.row, true));
+      zone.on('pointerout',  () => this.hoverCell(tank.col, tank.row, false));
+      zone.on('pointerdown', () => {
+        tank.treatment = tank.treatment === 'A' ? 'B' : 'A';
+        this.redrawAllTanks();
+        this.refreshAssignPanel();
+      });
+      ui.add(zone);
+    }
+
+    this.assignPanel = this.add.container(0, 0);
+    ui.add(this.assignPanel);
+    this.refreshAssignPanel();
+  }
+
+  refreshAssignPanel() {
+    if (!this.assignPanel) return;
+    this.assignPanel.removeAll(true);
+    const c = this.assignPanel;
+    const px = PANEL_X + 16, py = ROOM_Y + 12;
+
+    c.add(this.add.text(px, py, 'ASSIGN TREATMENTS',
+      { font: 'bold 14px monospace', fill: COL.text_main }));
+
+    c.add(this.add.text(px, py + 30, [
+      'Click each tank to toggle diet:',
+      '',
+      '  Green (A) = Vegetable diet',
+      '  Orange (B) = Seafood diet',
+      '',
+      'Tip: try to spread each diet',
+      'evenly across all columns.',
+    ].join('\n'), { font: '12px monospace', fill: COL.text_dim, lineSpacing: 2 }));
+
+    const nA = this.tanks.filter(t => t.treatment === 'A').length;
+    const nB = this.tanks.filter(t => t.treatment === 'B').length;
+
+    c.add(this.add.text(px, py + 178, `Diet A (Vegetable): ${nA}`,
+      { font: '13px monospace', fill: COL.text_A }));
+    c.add(this.add.text(px, py + 198, `Diet B (Seafood):   ${nB}`,
+      { font: '13px monospace', fill: COL.text_B }));
+
+    const canRun = nA >= 1 && nB >= 1;
+    const runBtn = this.makeBtn(px, py + 240,
+      ' Run Experiment → ',
+      canRun ? COL.btn_run : COL.btn_disabled,
+      () => { if (canRun) this.setPhase('RUN'); }, 200);
+    c.add(runBtn);
+
+    if (!canRun) {
+      c.add(this.add.text(px, py + 280, 'Need ≥ 1 tank per diet',
+        { font: '11px monospace', fill: '#EF9A9A' }));
+    }
+
+    const backBtn = this.makeBtn(px, py + 310, ' ← Back to Setup ', 0x37474F, () => {
+      this.tanks.forEach(t => t.treatment = null);
+      this.setPhase('SETUP');
+    }, 190);
+    c.add(backBtn);
+  }
+
+  // ── RUN phase ─────────────────────────────────────────────────────────────────
+
+  buildPhase_RUN() {
+    this.runElapsed = 0;
+    const ui = this.phaseUI;
+    const px = PANEL_X + 16, py = ROOM_Y + 12;
+
+    ui.add(this.add.text(px, py, 'EXPERIMENT RUNNING',
+      { font: 'bold 14px monospace', fill: COL.text_main }));
+
+    const barBg = this.add.graphics();
+    barBg.fillStyle(0x1B2836); barBg.fillRect(px, py + 40, PANEL_W - 32, 20);
+    ui.add(barBg);
+
+    this.runBarFg = this.add.graphics();
+    ui.add(this.runBarFg);
+
+    this.runTimeTxt = this.add.text(px, py + 66, 'Time: 0.0 / 4.0 s',
+      { font: '12px monospace', fill: COL.text_dim });
+    ui.add(this.runTimeTxt);
+
+    ui.add(this.add.text(px, py + 100, [
+      'Fish are eating and growing.',
+      '',
+      'FCR = Feed eaten ÷ Weight gained',
+      'Lower FCR = more efficient diet.',
+      '',
+      'Watch the fish grow!',
+    ].join('\n'), { font: '12px monospace', fill: COL.text_dim, lineSpacing: 2 }));
+  }
+
+  // ── update (animation loop) ───────────────────────────────────────────────────
+
+  update(time, delta) {
+    if (this.phase !== 'RUN') return;
+
+    this.runElapsed += delta;
+    const t = Math.min(this.runElapsed / this.RUN_DURATION, 1.0);
+
+    // Animate fish
+    this.tanks.forEach(tank => {
+      tank.fishGfx.forEach((fg, i) => {
+        fg.setAngle(Math.sin(time * 0.002 + tank.fishPhase[i]) * 15);
+        fg.setScale(1.0 + 0.6 * t);
+      });
+    });
+
+    // Progress bar
+    if (this.runBarFg) {
+      const px = PANEL_X + 16, py = ROOM_Y + 52;
+      this.runBarFg.clear();
+      this.runBarFg.fillStyle(0x66BB6A);
+      this.runBarFg.fillRect(px, py, (PANEL_W - 32) * t, 20);
+    }
+    if (this.runTimeTxt) {
+      this.runTimeTxt.setText(`Time: ${(this.runElapsed/1000).toFixed(1)} / 4.0 s`);
+    }
+
+    if (t >= 1.0) {
+      simulateData(this.tanks);
+      this.setPhase('RESULTS');
+    }
+  }
+
+  // ── RESULTS phase ─────────────────────────────────────────────────────────────
+
+  buildPhase_RESULTS() {
+    const ui = this.phaseUI;
+
+    // Full-canvas overlay
+    const bg = this.add.graphics();
+    bg.fillStyle(COL.bg); bg.fillRect(0, HEADER_H, W, H - HEADER_H);
+    ui.add(bg);
+
+    const px = 40, py = HEADER_H + 18;
+    ui.add(this.add.text(px, py, 'RESULTS — Food Conversion Ratio per Tank',
+      { font: 'bold 17px monospace', fill: COL.text_main }));
+
+    // Table columns
+    const cols = [px, px + 58, px + 190, px + 315, px + 410, px + 530];
+    const headers = ['Tank','Treatment','Column','N fish','Mean FCR'];
+    const hY = py + 38;
+    headers.forEach((h, i) =>
+      ui.add(this.add.text(cols[i], hY, h, { font: 'bold 12px monospace', fill: '#90CAF9' }))
+    );
+    const divG = this.add.graphics();
+    divG.lineStyle(1, 0x37474F);
+    divG.beginPath(); divG.moveTo(px, hY + 20); divG.lineTo(W - 40, hY + 20); divG.strokePath();
+    ui.add(divG);
+
+    // Sort: treatment then column
+    const sorted = [...this.tanks].sort((a, b) =>
+      a.treatment !== b.treatment ? (a.treatment < b.treatment ? -1 : 1) : a.col - b.col
+    );
+
+    const rowH = this.tanks.length > 12 ? 26 : 30;
+    const colNames = ['Far-door','Near-door','Centre','Near-win','Far-win'];
+
+    sorted.forEach((t, i) => {
+      const ry = hY + 26 + i * rowH;
+      const fill = t.treatment === 'A' ? COL.text_A : COL.text_B;
+      const trLabel = t.treatment === 'A' ? 'A (Vegetable)' : 'B (Seafood)';
+      ui.add(this.add.text(cols[0], ry, `T${t.id}`, { font: `${rowH-4}px monospace`, fill: COL.text_dim }));
+      ui.add(this.add.text(cols[1], ry, trLabel,     { font: `${rowH-4}px monospace`, fill }));
+      ui.add(this.add.text(cols[2], ry, colNames[t.col] || `Col${t.col}`,
+        { font: `${rowH-4}px monospace`, fill: COL.text_dim }));
+      ui.add(this.add.text(cols[3], ry, `${t.sampleSize}`,
+        { font: `${rowH-4}px monospace`, fill: COL.text_dim }));
+      ui.add(this.add.text(cols[4], ry, t.tankMeanFCR.toFixed(2),
+        { font: `bold ${rowH-4}px monospace`, fill: COL.text_main }));
+    });
+
+    // Legend: column gradient
+    const legY = H - 95;
+    ui.add(this.add.text(px, legY, 'Column effect on FCR (hidden during experiment):',
+      { font: '11px monospace', fill: COL.text_dim }));
+    const legCols = ['Far-door\n+2.0','Near-door\n+1.5','Centre\n+1.0','Near-win\n+0.5','Far-win\n+0.0'];
+    legCols.forEach((name, i) => {
+      const heat = 1 - i / 4;
+      const r = Math.round(255 * heat), b = Math.round(255 * (1 - heat));
+      const hex = '#' + r.toString(16).padStart(2,'0') + '44' + b.toString(16).padStart(2,'0');
+      ui.add(this.add.text(px + i * 140, legY + 16, name,
+        { font: '11px monospace', fill: hex, align: 'center' }));
+    });
+    ui.add(this.add.text(px, legY + 54,
+      '← Higher FCR (poor conversion)                                          Lower FCR (efficient) →',
+      { font: '10px monospace', fill: '#455A64' }));
+
+    // Analyse button
+    ui.add(this.makeBtn(W - 230, H - 52, '  Analyse Results →  ', COL.btn_analyse,
+      () => this.setPhase('ANALYSIS'), 220));
+  }
+
+  // ── ANALYSIS phase ────────────────────────────────────────────────────────────
+
+  buildPhase_ANALYSIS() {
+    const ui = this.phaseUI;
+
+    const bg = this.add.graphics();
+    bg.fillStyle(COL.bg); bg.fillRect(0, HEADER_H, W, H - HEADER_H);
+    ui.add(bg);
+
+    ui.add(this.add.text(40, HEADER_H + 18,
+      'ANALYSIS — Mean FCR with 95% Confidence Intervals',
+      { font: 'bold 16px monospace', fill: COL.text_main }));
+
+    const stats = summarise(this.tanks);
+    this.drawBarChart(ui, stats);
+    this.drawSummaryTable(ui, stats);
+    this.drawInterpretation(ui, stats);
+
+    ui.add(this.makeBtn(40, H - 52, '  ← New Experiment  ', COL.btn_reset, () => {
+      this.tanks = []; this.sampleSize = 5;
+      this.tankContainer.removeAll(true);
+      this.setPhase('SETUP');
+    }, 190));
+
+    ui.add(this.makeBtn(248, H - 52, '  ← Back to Results  ', 0x37474F,
+      () => this.setPhase('RESULTS'), 200));
+  }
+
+  drawBarChart(ui, stats) {
+    const chartX = 40, chartY = HEADER_H + 62;
+    const chartW = 430, chartH = 350;
+    const padL = 58, padB = 52, padT = 22, padR = 20;
+    const plotX = chartX + padL, plotY = chartY + padT;
+    const plotW = chartW - padL - padR, plotH = chartH - padT - padB;
+
+    const allHi = ['A','B'].map(tr => stats[tr].ci_hi ?? stats[tr].mean ?? 0).filter(v => v !== null);
+    const yMax = Math.ceil(Math.max(...allHi, 1) * 1.2);
+
+    const g = this.add.graphics();
+    g.fillStyle(0x0f1f2d); g.fillRect(plotX, plotY, plotW, plotH);
+    g.lineStyle(1, 0x37474F); g.strokeRect(plotX, plotY, plotW, plotH);
+    ui.add(g);
+
+    // Y gridlines + tick labels
+    for (let yv = 0; yv <= yMax; yv++) {
+      const ypx = plotY + plotH - (yv / yMax) * plotH;
+      const gl = this.add.graphics();
+      gl.lineStyle(1, 0x263238, 0.7);
+      gl.beginPath(); gl.moveTo(plotX, ypx); gl.lineTo(plotX + plotW, ypx); gl.strokePath();
+      ui.add(gl);
+      ui.add(this.add.text(plotX - 6, ypx - 7, `${yv}`,
+        { font: '11px monospace', fill: COL.text_dim }).setOrigin(1, 0));
+    }
+
+    // Axis labels
+    ui.add(this.add.text(chartX + 10, plotY + plotH/2, 'Mean FCR',
+      { font: '12px monospace', fill: COL.text_dim }).setOrigin(0.5).setAngle(-90));
+    ui.add(this.add.text(plotX + plotW/2, plotY + plotH + 34, 'Diet Treatment',
+      { font: '12px monospace', fill: COL.text_dim }).setOrigin(0.5));
+
+    // Bars
+    const barW = 80;
+    const cx = [plotX + plotW * 0.30, plotX + plotW * 0.70];
+    const colors = [0x4CAF50, 0xFF9800];
+    const trLabels = ['A\n(Vegetable)', 'B\n(Seafood)'];
+
+    ['A','B'].forEach((tr, i) => {
+      const s = stats[tr];
+      if (s.n === 0 || s.mean === null) {
+        ui.add(this.add.text(cx[i], plotY + plotH/2, 'No data',
+          { font: '13px monospace', fill: '#546E7A' }).setOrigin(0.5));
+        return;
+      }
+      const barTopY = plotY + plotH - (s.mean / yMax) * plotH;
+      const barH = plotY + plotH - barTopY;
+
+      const bar = this.add.graphics();
+      bar.fillStyle(colors[i], 0.8);
+      bar.fillRect(cx[i] - barW/2, barTopY, barW, barH);
+      bar.lineStyle(2, 0xffffff, 0.25);
+      bar.strokeRect(cx[i] - barW/2, barTopY, barW, barH);
+      ui.add(bar);
+
+      ui.add(this.add.text(cx[i], barTopY - 6, s.mean.toFixed(2),
+        { font: 'bold 14px monospace', fill: '#ffffff' }).setOrigin(0.5, 1));
+
+      // Error bars
+      if (s.ci_lo !== null) {
+        const ciLoY = plotY + plotH - (s.ci_lo / yMax) * plotH;
+        const ciHiY = plotY + plotH - (s.ci_hi / yMax) * plotH;
+        const eb = this.add.graphics();
+        eb.lineStyle(2, 0xffffff, 0.85);
+        eb.beginPath(); eb.moveTo(cx[i], ciLoY); eb.lineTo(cx[i], ciHiY); eb.strokePath();
+        const cap = 12;
+        [ciLoY, ciHiY].forEach(capY => {
+          eb.beginPath(); eb.moveTo(cx[i]-cap, capY); eb.lineTo(cx[i]+cap, capY); eb.strokePath();
+        });
+        ui.add(eb);
+        // CI annotation
+        ui.add(this.add.text(cx[i], ciHiY - 4,
+          `[${s.ci_lo.toFixed(2)}, ${s.ci_hi.toFixed(2)}]`,
+          { font: '10px monospace', fill: '#B0BEC5' }).setOrigin(0.5, 1));
+      } else {
+        ui.add(this.add.text(cx[i], barTopY - 20, '(CI: need ≥ 2 tanks)',
+          { font: '10px monospace', fill: '#EF9A9A' }).setOrigin(0.5, 1));
+      }
+
+      // X-axis label
+      ui.add(this.add.text(cx[i], plotY + plotH + 8, `Diet ${trLabels[i]}`,
+        { font: 'bold 12px monospace', fill: i === 0 ? COL.text_A : COL.text_B, align: 'center' }).setOrigin(0.5, 0));
+    });
+  }
+
+  drawSummaryTable(ui, stats) {
+    const tx = 510, ty = HEADER_H + 62;
+    ui.add(this.add.text(tx, ty, 'Summary Statistics',
+      { font: 'bold 14px monospace', fill: '#90CAF9' }));
+
+    const cols = [tx, tx+130, tx+240, tx+330, tx+430];
+    ['Treatment','N tanks','Mean FCR','95% CI lo','95% CI hi'].forEach((h, i) =>
+      ui.add(this.add.text(cols[i], ty+24, h, { font: '11px monospace', fill: '#546E7A' }))
+    );
+    const dg = this.add.graphics();
+    dg.lineStyle(1, 0x37474F);
+    dg.beginPath(); dg.moveTo(tx, ty+40); dg.lineTo(tx+555, ty+40); dg.strokePath();
+    ui.add(dg);
+
+    ['A','B'].forEach((tr, i) => {
+      const s = stats[tr];
+      const ry = ty + 50 + i * 30;
+      const fill = tr === 'A' ? COL.text_A : COL.text_B;
+      ui.add(this.add.text(cols[0], ry, tr==='A'?'A (Vegetable)':'B (Seafood)',
+        { font: '13px monospace', fill }));
+      ui.add(this.add.text(cols[1], ry, `${s.n}`,
+        { font: '13px monospace', fill: COL.text_main }));
+      ui.add(this.add.text(cols[2], ry,
+        s.mean !== null ? s.mean.toFixed(2) : '—',
+        { font: 'bold 13px monospace', fill: COL.text_main }));
+      if (s.ci_lo !== null) {
+        ui.add(this.add.text(cols[3], ry, s.ci_lo.toFixed(2), { font: '13px monospace', fill: COL.text_dim }));
+        ui.add(this.add.text(cols[4], ry, s.ci_hi.toFixed(2), { font: '13px monospace', fill: COL.text_dim }));
+      } else if (s.n === 1) {
+        ui.add(this.add.text(cols[3], ry, '≥ 2 tanks needed',
+          { font: '11px monospace', fill: '#EF9A9A' }));
+      } else {
+        ui.add(this.add.text(cols[3], ry, '—', { font: '13px monospace', fill: COL.text_dim }));
+      }
+    });
+
+    // Formulas
+    ui.add(this.add.text(tx, ty + 122, [
+      'SE  = SD(tank means) / √n',
+      't*  = t_{df=n−1, α/2=0.025}',
+      '95% CI  = mean ± t* × SE',
+    ].join('\n'), { font: '11px monospace', fill: '#546E7A', lineSpacing: 3 }));
+  }
+
+  drawInterpretation(ui, stats) {
+    const tx = 510, ty = HEADER_H + 260;
+    ui.add(this.add.text(tx, ty, 'Interpretation',
+      { font: 'bold 14px monospace', fill: '#90CAF9' }));
+
+    const sA = stats['A'], sB = stats['B'];
+    const lines = [];
+
+    if (sA.mean !== null && sB.mean !== null) {
+      const diff = sA.mean - sB.mean;
+      lines.push(`A mean FCR: ${sA.mean.toFixed(2)}   B mean FCR: ${sB.mean.toFixed(2)}`);
+      lines.push(`Difference (A − B): ${diff.toFixed(2)}`);
+      lines.push('');
+      if (sA.ci_lo !== null && sB.ci_hi !== null) {
+        if (sA.ci_lo > sB.ci_hi) {
+          lines.push('CIs do NOT overlap → strong evidence');
+          lines.push('that diet A has higher FCR than B.');
+        } else if (sA.ci_hi !== null && sB.ci_lo !== null && sB.ci_lo > sA.ci_hi) {
+          lines.push('CIs do NOT overlap → strong evidence');
+          lines.push('that diet B has lower FCR than A.');
+        } else {
+          lines.push('CIs overlap → weaker evidence of');
+          lines.push('a difference between diets.');
+        }
+      }
+    } else if (sA.mean !== null || sB.mean !== null) {
+      lines.push('Only one diet has data — cannot');
+      lines.push('compare treatments.');
+    } else {
+      lines.push('No data to interpret.');
+    }
+
+    lines.push('');
+    lines.push('THINK: Were your diet A tanks spread');
+    lines.push('across columns, or clustered near');
+    lines.push('the door/window? A column confound');
+    lines.push('can bias your diet comparison!');
+    lines.push('');
+    lines.push('Ideal design: randomise each diet');
+    lines.push('across all column positions.');
+
+    ui.add(this.add.text(tx, ty + 22, lines.join('\n'),
+      { font: '12px monospace', fill: COL.text_dim, lineSpacing: 2, wordWrap: { width: 560 } }));
+  }
+
+  // ── Button factory ────────────────────────────────────────────────────────────
+
+  makeBtn(x, y, label, color, callback, width = 160) {
+    const h = 34;
+    const cont = this.add.container(x, y);
+    const bg = this.add.graphics();
+    bg.fillStyle(color); bg.fillRoundedRect(0, 0, width, h, 6);
+    const txt = this.add.text(width/2, h/2, label,
+      { font: 'bold 13px monospace', fill: '#ffffff' }).setOrigin(0.5);
+    cont.add([bg, txt]);
+    cont.setSize(width, h);
+    cont.setInteractive(
+      new Phaser.Geom.Rectangle(0, 0, width, h),
+      Phaser.Geom.Rectangle.Contains
+    );
+    const hoverColor = color === COL.btn_disabled ? color : lightenColor(color);
+    cont.on('pointerover', () => {
+      bg.clear(); bg.fillStyle(hoverColor); bg.fillRoundedRect(0, 0, width, h, 6);
+    });
+    cont.on('pointerout', () => {
+      bg.clear(); bg.fillStyle(color); bg.fillRoundedRect(0, 0, width, h, 6);
+    });
+    cont.on('pointerdown', callback);
+    return cont;
+  }
+}
+
+// ── Phaser game config ────────────────────────────────────────────────────────
+
+new Phaser.Game({
+  type: Phaser.AUTO,
+  width: W,
+  height: H,
+  backgroundColor: '#1a2e3d',
+  parent: 'gc',
+  scene: FishTankScene,
+});
+</script>
+</body>
+</html>
