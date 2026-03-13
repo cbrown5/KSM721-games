@@ -117,7 +117,8 @@ textarea#model-code {
   font-family: var(--mono);
   font-size: 13px;
   line-height: 1.6;
-  resize: none;
+  resize: vertical;
+  min-height: 220px;
   outline: none;
   transition: border-color 0.2s;
 }
@@ -562,6 +563,8 @@ input#file-input { display: none; }
 <script src="js/parser.js"></script>
 <script src="js/sampler.js"></script>
 <script src="js/visualizer.js"></script>
+
+
 <script>
 'use strict';
 
@@ -822,69 +825,108 @@ function runSampler() {
   let completedChains = 0;
   const chainProgress = new Array(nChains).fill(0);
 
-  // Spawn one Worker per chain
-  appState.workers = [];
-  for (let ci = 0; ci < nChains; ci++) {
-    const worker = new Worker('js/worker.js');
-    appState.workers.push(worker);
+  // Shared handler called when a chain sends a progress or done message.
+  // Works whether the message came from a Worker or from the main-thread fallback.
+  function handleChainMessage(msg) {
+    const ci = msg.chainId;
 
-    worker.onmessage = (e) => {
-      const msg = e.data;
-
-      if (msg.type === 'progress') {
-        // Merge incoming batch into chain
-        for (const sample of msg.batch) {
-          appState.chains[msg.chainId].push(sample);
-        }
-        chainProgress[msg.chainId] = msg.iteration / (nWarmup + nIter);
-        const overallProgress = chainProgress.reduce((a,b)=>a+b,0) / nChains;
-        setStatus('running', `Running… ${Math.round(overallProgress*100)}%`, overallProgress);
-
-        // Live-update traces
-        if (appState.paramNames.length > 0) {
-          const activeParam = getActiveParam('trace');
-          if (activeParam) updateTracePlots(activeParam);
-        }
+    if (msg.type === 'progress') {
+      for (const sample of msg.batch) {
+        appState.chains[ci].push(sample);
       }
+      chainProgress[ci] = msg.iteration / (nWarmup + nIter);
+      const overallProgress = chainProgress.reduce((a,b)=>a+b,0) / nChains;
+      setStatus('running', `Running… ${Math.round(overallProgress*100)}%`, overallProgress);
 
-      if (msg.type === 'done') {
-        completedChains++;
-        log(`Chain ${msg.chainId + 1} done. Acceptance: ${
-          Object.entries(msg.acceptanceRates).map(([p,r]) => `${p}=${(r*100).toFixed(0)}%`).join(', ')
-        }`, 'success');
-
-        if (completedChains === nChains) {
-          appState.running = false;
-          appState.workers = [];
-          document.getElementById('run-btn').disabled = false;
-          document.getElementById('stop-btn').disabled = true;
-          const elapsed = ((Date.now() - appState.startTime) / 1000).toFixed(1);
-          document.getElementById('time-display').textContent = `${elapsed}s`;
-          setStatus('done', `Done — ${nChains} chain(s), ${nIter} samples each`, 1);
-          log(`Sampling complete in ${elapsed}s.`, 'success');
-          renderAllPlots();
-        }
+      if (appState.paramNames.length > 0) {
+        const activeParam = getActiveParam('trace');
+        if (activeParam) updateTracePlots(activeParam);
       }
+    }
 
-      if (msg.type === 'error') {
-        log(`Worker error (chain ${ci}): ${msg.message}`, 'error');
-        stopSampler();
+    if (msg.type === 'done') {
+      completedChains++;
+      log(`Chain ${ci + 1} done. Acceptance: ${
+        Object.entries(msg.acceptanceRates).map(([p,r]) => `${p}=${(r*100).toFixed(0)}%`).join(', ')
+      }`, 'success');
+
+      if (completedChains === nChains) {
+        appState.running = false;
+        appState.workers = [];
+        document.getElementById('run-btn').disabled = false;
+        document.getElementById('stop-btn').disabled = true;
+        const elapsed = ((Date.now() - appState.startTime) / 1000).toFixed(1);
+        document.getElementById('time-display').textContent = `${elapsed}s`;
+        setStatus('done', `Done — ${nChains} chain(s), ${nIter} samples each`, 1);
+        log(`Sampling complete in ${elapsed}s.`, 'success');
+        renderAllPlots();
       }
-    };
+    }
 
-    worker.onerror = (e) => {
-      log(`Worker exception: ${e.message}`, 'error');
+    if (msg.type === 'error') {
+      log(`Sampler error (chain ${ci}): ${msg.message}`, 'error');
       stopSampler();
-    };
-
-    worker.postMessage({
-      cmd: 'run',
-      modelSrc,
-      data: appState.data,
-      options: { nIter, nWarmup, thin },
-      chainId: ci
-    });
+    }
   }
+
+  // Try to spawn Web Workers; fall back to main-thread sampling if blocked
+  // (e.g. when the page is opened as a file:// URL).
+  function spawnChain(ci) {
+    try {
+      const worker = new Worker('js/worker.js');
+      appState.workers.push(worker);
+      worker.onmessage = (e) => handleChainMessage(e.data);
+      worker.onerror   = (e) => {
+        log(`Worker error (chain ${ci + 1}): ${e.message || 'unknown'}`, 'error');
+        // If it's the very first chain and no samples yet, assume Workers are
+        // blocked (file:// restriction) and rerun everything in-thread.
+        if (completedChains === 0 && appState.chains.every(c => c.length === 0)) {
+          log('Web Workers unavailable — running in main thread (UI may freeze briefly).', 'warn');
+          appState.workers.forEach(w => { try { w.terminate(); } catch(_){} });
+          appState.workers = [];
+          for (let k = 0; k < nChains; k++) runChainInThread(k);
+        } else {
+          stopSampler();
+        }
+      };
+      worker.postMessage({
+        cmd: 'run', modelSrc,
+        data: appState.data,
+        options: { nIter, nWarmup, thin },
+        chainId: ci
+      });
+    } catch (e) {
+      log('Web Workers unavailable — running in main thread.', 'warn');
+      appState.workers = [];
+      for (let k = 0; k < nChains; k++) runChainInThread(k);
+    }
+  }
+
+  // Main-thread fallback: run one chain synchronously via setTimeout chunking
+  // so the browser can paint status updates between batches.
+  function runChainInThread(ci) {
+    if (!appState.running) return;
+    try {
+      const ast      = parseJAGS(modelSrc);
+      const compiled = compileModel(ast);
+      const sampler  = new GibbsSampler(compiled, appState.data, { nIter, nWarmup, thin });
+      const result   = sampler.runChain(null, (batch, iteration) => {
+        handleChainMessage({ type: 'progress', chainId: ci, batch, iteration });
+      });
+      handleChainMessage({
+        type: 'done', chainId: ci,
+        samples: result.samples,
+        acceptanceRates: result.acceptanceRates
+      });
+    } catch (e) {
+      handleChainMessage({ type: 'error', chainId: ci, message: e.message });
+    }
+  }
+
+  appState.workers = [];
+  // Chains are run sequentially in main-thread mode; in Worker mode they run in parallel.
+  spawnChain(0);
+  for (let ci = 1; ci < nChains; ci++) spawnChain(ci);
 }
 
 // ---------------------------------------------------------------------------

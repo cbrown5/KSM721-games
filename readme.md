@@ -1,7 +1,5 @@
 ## Probability games
 
-add gibbs sampler...
-
 Silly probability games made for my stats class (KSM721). Fully vibe coded html and JS with some checking of equations for scientific accuracy. Use with caution!
 
 [likelihood-distribution-game](likelihood-distribution-game/index.html)
