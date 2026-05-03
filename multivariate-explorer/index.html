@@ -1,0 +1,1047 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multivariate Explorer</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  background: #f0f2f5;
+  color: #2d3436;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+#app-header {
+  background: #1e272e;
+  color: #dfe6e9;
+  padding: 10px 20px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  z-index: 10;
+}
+
+#app-header h1 {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: white;
+  letter-spacing: 0.03em;
+}
+
+#app-header label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  color: #b2bec3;
+}
+
+#app-header select {
+  background: #2d3436;
+  color: #dfe6e9;
+  border: 1px solid #636e72;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+#panels {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  gap: 0;
+}
+
+.panel {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 14px 16px;
+  background: #f8f9fa;
+}
+
+#left-panel {
+  border-right: 2px solid #dfe6e9;
+  background: #ffffff;
+}
+
+#right-panel {
+  background: #fafbfc;
+}
+
+.panel-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #74b9ff;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 10px;
+}
+
+.section-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #b2bec3;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 14px 0 6px;
+}
+
+/* Variable toggles */
+#var-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+
+.var-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 11px;
+  border-radius: 20px;
+  border: 2px solid #dfe6e9;
+  cursor: pointer;
+  font-size: 0.76rem;
+  background: white;
+  transition: all 0.12s;
+  user-select: none;
+  color: #636e72;
+  font-weight: 500;
+}
+
+.var-toggle.active {
+  background: #6c5ce7;
+  border-color: #6c5ce7;
+  color: white;
+}
+
+.var-toggle:hover { opacity: 0.8; }
+
+/* SVG cells */
+.scatter-cell { cursor: crosshair; }
+.scatter-cell.highlighted .cell-bg { stroke: #e17055 !important; stroke-width: 2px; }
+.scatter-cell:hover .cell-bg { stroke: #6c5ce7; stroke-width: 1.5px; }
+.heatmap-cell { cursor: crosshair; }
+.heatmap-cell.highlighted .hm-rect { stroke: #e17055 !important; stroke-width: 2.5px !important; }
+
+/* PC selectors */
+#pc-selectors {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+#pc-selectors label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: #636e72;
+  font-weight: 500;
+}
+
+#pc-selectors select {
+  border: 1px solid #dfe6e9;
+  border-radius: 4px;
+  padding: 3px 8px;
+  background: white;
+  font-size: 0.8rem;
+  cursor: pointer;
+  color: #2d3436;
+}
+
+/* Legend */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 6px 0 2px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.75rem;
+  color: #636e72;
+}
+
+.legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Tooltip */
+#tooltip {
+  position: fixed;
+  background: rgba(30,39,46,0.92);
+  color: #dfe6e9;
+  padding: 5px 9px;
+  border-radius: 5px;
+  font-size: 0.72rem;
+  pointer-events: none;
+  z-index: 9999;
+  display: none;
+  max-width: 220px;
+  line-height: 1.4;
+}
+
+svg { display: block; }
+svg text { user-select: none; }
+
+.chart-wrap { overflow-x: auto; }
+
+#note-min-vars {
+  color: #b2bec3;
+  font-size: 0.8rem;
+  margin-top: 8px;
+}
+</style>
+</head>
+<body>
+
+<div id="app-header">
+  <h1>Multivariate Explorer</h1>
+  <label>Dataset: <select id="dataset-selector"></select></label>
+  <span id="header-info" style="font-size:0.75rem;color:#636e72;margin-left:auto"></span>
+</div>
+
+<div id="panels">
+  <!-- LEFT PANEL -->
+  <div id="left-panel" class="panel">
+    <div class="panel-title">Explore</div>
+
+    <div class="section-label">Variables</div>
+    <div id="var-toggles"></div>
+
+    <div class="section-label">Pairwise Scatterplots</div>
+    <div class="chart-wrap" id="scatter-matrix-container"></div>
+
+    <div class="section-label">Correlation Heatmap</div>
+    <div class="chart-wrap" id="heatmap-container"></div>
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div id="right-panel" class="panel">
+    <div class="panel-title">Ordinate (PCA)</div>
+
+    <div id="pc-selectors">
+      <label>X axis: <select id="x-pc"></select></label>
+      <label>Y axis: <select id="y-pc"></select></label>
+    </div>
+
+    <div id="pca-legend" class="legend"></div>
+    <div class="chart-wrap" id="pca-scatter-container"></div>
+
+    <div class="section-label">Variance Explained</div>
+    <div class="chart-wrap" id="variance-chart-container"></div>
+  </div>
+</div>
+
+<div id="tooltip"></div>
+
+<script>
+'use strict';
+
+// ── Utilities ────────────────────────────────────────────────────────────────
+
+function svgEl(tag, attrs = {}) {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
+  return el;
+}
+
+function makeSVG(w, h) {
+  return svgEl('svg', { width: w, height: h, viewBox: `0 0 ${w} ${h}` });
+}
+
+function corrColor(r) {
+  const t = Math.max(-1, Math.min(1, r));
+  if (t >= 0) {
+    const s = t;
+    return `rgb(255,${Math.round(255*(1-s*0.85))},${Math.round(255*(1-s*0.85))})`;
+  } else {
+    const s = -t;
+    return `rgb(${Math.round(255*(1-s*0.85))},${Math.round(255*(1-s*0.85))},255)`;
+  }
+}
+
+const GP_COLORS = ['#e74c3c', '#3498db', '#27ae60', '#f39c12', '#9b59b6', '#1abc9c'];
+const GP_FILL   = ['rgba(231,76,60,0.65)', 'rgba(52,152,219,0.65)', 'rgba(39,174,96,0.65)',
+                   'rgba(243,156,18,0.65)', 'rgba(155,89,182,0.65)', 'rgba(26,188,156,0.65)'];
+
+function drawArrow(parent, x1, y1, x2, y2, color, label) {
+  const dx = x2 - x1, dy = y2 - y1;
+  const len = Math.sqrt(dx*dx + dy*dy);
+  if (len < 2) return;
+  parent.appendChild(svgEl('line', { x1, y1, x2, y2, stroke: color, 'stroke-width': 1.5, 'stroke-opacity': 0.85 }));
+  const ang = Math.atan2(dy, dx);
+  const hl = Math.min(8, len * 0.35);
+  const ha = 0.42;
+  const hx1 = x2 - hl * Math.cos(ang - ha), hy1 = y2 - hl * Math.sin(ang - ha);
+  const hx2 = x2 - hl * Math.cos(ang + ha), hy2 = y2 - hl * Math.sin(ang + ha);
+  parent.appendChild(svgEl('polygon', {
+    points: `${x2},${y2} ${hx1},${hy1} ${hx2},${hy2}`,
+    fill: color, 'fill-opacity': 0.9,
+  }));
+  if (label) {
+    const lx = x2 + (dx / len) * 10;
+    const ly = y2 + (dy / len) * 10;
+    const txt = svgEl('text', {
+      x: lx, y: ly,
+      'text-anchor': 'middle', 'dominant-baseline': 'middle',
+      'font-size': 9, fill: color, 'font-weight': '600',
+    });
+    txt.textContent = label;
+    parent.appendChild(txt);
+  }
+}
+
+// ── Math ────────────────────────────────────────────────────────────────────
+
+function pearsonR(xs, ys) {
+  const n = xs.length;
+  let mx = 0, my = 0;
+  for (let i = 0; i < n; i++) { mx += xs[i]; my += ys[i]; }
+  mx /= n; my /= n;
+  let num = 0, dx2 = 0, dy2 = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = xs[i] - mx, dy = ys[i] - my;
+    num += dx * dy; dx2 += dx*dx; dy2 += dy*dy;
+  }
+  const den = Math.sqrt(dx2 * dy2);
+  return den < 1e-12 ? 0 : num / den;
+}
+
+function runPCA(data) {
+  const n = data.length;
+  const p = data[0].length;
+
+  // Center
+  const mu = Array(p).fill(0);
+  for (const r of data) for (let j = 0; j < p; j++) mu[j] += r[j];
+  for (let j = 0; j < p; j++) mu[j] /= n;
+  const X = data.map(r => r.map((v, j) => v - mu[j]));
+
+  // Covariance
+  const C = Array.from({length: p}, () => Array(p).fill(0));
+  for (const r of X) for (let i = 0; i < p; i++) for (let j = 0; j < p; j++) C[i][j] += r[i]*r[j];
+  const dv = Math.max(n - 1, 1);
+  for (let i = 0; i < p; i++) for (let j = 0; j < p; j++) C[i][j] /= dv;
+
+  // Power iteration + deflation
+  const M = C.map(r => [...r]);
+  const vecs = [], vals = [];
+
+  for (let k = 0; k < p; k++) {
+    let v = Array.from({length: p}, (_, i) => i === k ? 1 : 0.01 * (i + 1));
+    let nm = Math.sqrt(v.reduce((s, x) => s + x*x, 0));
+    v = v.map(x => x / nm);
+
+    for (let iter = 0; iter < 600; iter++) {
+      const Mv = Array(p).fill(0);
+      for (let i = 0; i < p; i++) for (let j = 0; j < p; j++) Mv[i] += M[i][j] * v[j];
+      nm = Math.sqrt(Mv.reduce((s, x) => s + x*x, 0));
+      if (nm < 1e-10) break;
+      const vn = Mv.map(x => x / nm);
+      if (vn.reduce((s, x, i) => s + (x - v[i])**2, 0) < 1e-15) { v = vn; break; }
+      v = vn;
+    }
+
+    const Mv = Array(p).fill(0);
+    for (let i = 0; i < p; i++) for (let j = 0; j < p; j++) Mv[i] += M[i][j] * v[j];
+    const lam = Math.max(0, v.reduce((s, x, i) => s + x * Mv[i], 0));
+
+    // Canonical sign: largest-magnitude loading is positive
+    const mi = v.reduce((bi, x, i) => Math.abs(x) > Math.abs(v[bi]) ? i : bi, 0);
+    if (v[mi] < 0) v = v.map(x => -x);
+
+    vecs.push(v);
+    vals.push(lam);
+    for (let i = 0; i < p; i++) for (let j = 0; j < p; j++) M[i][j] -= lam * v[i] * v[j];
+  }
+
+  const scores = X.map(r => vecs.map(v => r.reduce((s, x, j) => s + x * v[j], 0)));
+  const tot = vals.reduce((s, v) => s + v, 0);
+  const varExp = vals.map(v => tot > 1e-10 ? v / tot : 0);
+
+  return { vecs, vals, scores, varExp };
+}
+
+// ── Data generation ─────────────────────────────────────────────────────────
+
+function seededRand(seed) {
+  let s = (seed >>> 0) || 1;
+  return () => { s ^= s << 13; s ^= s >> 17; s ^= s << 5; return (s >>> 0) / 4294967296; };
+}
+
+function makeGauss(rand) {
+  let spare = null;
+  return (mu, sd) => {
+    if (spare !== null) { const r = spare; spare = null; return mu + sd * r; }
+    let u, v, s;
+    do { u = rand() * 2 - 1; v = rand() * 2 - 1; s = u*u + v*v; } while (s >= 1 || s < 1e-10);
+    const f = Math.sqrt(-2 * Math.log(s) / s);
+    spare = v * f;
+    return mu + sd * u * f;
+  };
+}
+
+function r1(x) { return Math.round(x * 10) / 10; }
+function r2(x) { return Math.round(x * 100) / 100; }
+function clamp(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); }
+
+// Iris-like: sepal length, sepal width, petal length, petal width
+function generateIris() {
+  const g = makeGauss(seededRand(7));
+  const specs = [
+    [50, [5.006,0.352], [3.428,0.379], [1.462,0.174], [0.246,0.105]],  // setosa
+    [50, [5.936,0.516], [2.770,0.314], [4.260,0.470], [1.326,0.198]],  // versicolor
+    [50, [6.588,0.636], [2.974,0.322], [5.552,0.552], [2.026,0.275]],  // virginica
+  ];
+  const out = [];
+  for (let gi = 0; gi < specs.length; gi++) {
+    const [n, ...params] = specs[gi];
+    for (let i = 0; i < n; i++) {
+      out.push([
+        r1(clamp(g(...params[0]), 4.0, 8.5)),
+        r1(clamp(g(...params[1]), 1.5, 5.0)),
+        r1(clamp(g(...params[2]), 0.5, 7.0)),
+        r1(clamp(g(...params[3]), 0.05, 2.8)),
+        gi,
+      ]);
+    }
+  }
+  return out;
+}
+
+// Penguin-like: bill length (mm), bill depth (mm), flipper length (cm), body mass (kg)
+function generatePenguins() {
+  const g = makeGauss(seededRand(31));
+  const specs = [
+    [52, [38.8,2.7], [18.3,1.2], [19.0,0.64], [3.70,0.46]],  // Adelie
+    [68, [48.8,3.3], [18.4,1.1], [19.6,0.71], [3.73,0.38]],  // Chinstrap
+    [80, [47.5,3.1], [14.98,0.98], [21.7,0.65], [5.08,0.50]], // Gentoo
+  ];
+  const out = [];
+  for (let gi = 0; gi < specs.length; gi++) {
+    const [n, ...params] = specs[gi];
+    for (let i = 0; i < n; i++) {
+      out.push([
+        r1(clamp(g(...params[0]), 28, 62)),
+        r1(clamp(g(...params[1]), 12, 22)),
+        r1(clamp(g(...params[2]), 16.5, 24.5)),
+        r2(clamp(g(...params[3]), 2.5, 6.5)),
+        gi,
+      ]);
+    }
+  }
+  return out;
+}
+
+// Reef fish morphology: body length (cm), body depth (cm), head length (cm), eye diameter (mm)
+function generateFish() {
+  const g = makeGauss(seededRand(99));
+  const specs = [
+    [45, [22, 3.5], [6.5, 0.9], [5.8, 0.7], [9.2, 1.2]],    // Slender benthic
+    [45, [15, 2.8], [8.2, 1.1], [4.1, 0.6], [11.8, 1.5]],   // Compact deep-bodied
+    [40, [32, 4.5], [7.0, 1.0], [8.5, 1.0], [7.5, 1.0]],    // Large fusiform
+  ];
+  const out = [];
+  for (let gi = 0; gi < specs.length; gi++) {
+    const [n, ...params] = specs[gi];
+    for (let i = 0; i < n; i++) {
+      out.push([
+        r1(clamp(g(...params[0]), 8, 50)),
+        r1(clamp(g(...params[1]), 3, 16)),
+        r1(clamp(g(...params[2]), 2, 14)),
+        r1(clamp(g(...params[3]), 4, 18)),
+        gi,
+      ]);
+    }
+  }
+  return out;
+}
+
+// ── Dataset registry ─────────────────────────────────────────────────────────
+
+const DATASETS = {
+  iris: {
+    label: 'Iris flowers',
+    vars: ['Sepal Length', 'Sepal Width', 'Petal Length', 'Petal Width'],
+    units: ['cm', 'cm', 'cm', 'cm'],
+    groupLabel: 'Species',
+    groups: ['I. setosa', 'I. versicolor', 'I. virginica'],
+    generate: generateIris,
+  },
+  penguins: {
+    label: 'Palmer penguins',
+    vars: ['Bill Length', 'Bill Depth', 'Flipper Length', 'Body Mass'],
+    units: ['mm', 'mm', 'cm', 'kg'],
+    groupLabel: 'Species',
+    groups: ['Adelie', 'Chinstrap', 'Gentoo'],
+    generate: generatePenguins,
+  },
+  fish: {
+    label: 'Reef fish morphology',
+    vars: ['Body Length', 'Body Depth', 'Head Length', 'Eye Diameter'],
+    units: ['cm', 'cm', 'cm', 'mm'],
+    groupLabel: 'Family',
+    groups: ['Slender benthic', 'Deep-bodied', 'Large fusiform'],
+    generate: generateFish,
+  },
+};
+
+// ── State ───────────────────────────────────────────────────────────────────
+
+let DS       = null;    // current dataset object (from DATASETS)
+let SAMPLES  = [];      // generated samples [[v0,v1,...,groupIdx], ...]
+let ACTIVE   = [];      // indices of active variables
+let HOVERED  = null;    // {row, col} or null
+let X_PC     = 0;
+let Y_PC     = 1;
+let PCA      = null;    // runPCA result
+
+// ── Scatter matrix ───────────────────────────────────────────────────────────
+
+const CELL = 112;
+const CP   = 10;       // cell padding
+
+function renderScatterMatrix() {
+  const container = document.getElementById('scatter-matrix-container');
+  const nv = ACTIVE.length;
+  if (nv < 2) {
+    container.innerHTML = '<p id="note-min-vars">Select at least 2 variables.</p>';
+    return;
+  }
+
+  // Per-variable extent (across all data, not just active — keeps scale stable as toggles change)
+  const extents = ACTIVE.map(vi => {
+    const vals = SAMPLES.map(s => s[vi]);
+    const lo = Math.min(...vals), hi = Math.max(...vals);
+    const pad = (hi - lo) * 0.06;
+    return [lo - pad, hi + pad];
+  });
+
+  const W = nv * CELL, H = nv * CELL;
+  const svg = makeSVG(W, H);
+
+  for (let row = 0; row < nv; row++) {
+    for (let col = 0; col < nv; col++) {
+      const gx = col * CELL, gy = row * CELL;
+      const g = svgEl('g', { class: 'scatter-cell', transform: `translate(${gx},${gy})`,
+                              'data-row': row, 'data-col': col });
+
+      // Background
+      g.appendChild(svgEl('rect', {
+        class: 'cell-bg', x: 1, y: 1, width: CELL-2, height: CELL-2,
+        fill: row === col ? '#f0f3ff' : 'white',
+        stroke: '#dde1e7', 'stroke-width': 0.8, rx: 2,
+      }));
+
+      if (row === col) {
+        // Diagonal: variable name + units
+        const varName = DS.vars[ACTIVE[row]];
+        const unit    = DS.units[ACTIVE[row]];
+        const words   = varName.split(' ');
+        let yOff = CELL/2 - (words.length - 1) * 7;
+        for (const word of words) {
+          const t = svgEl('text', { x: CELL/2, y: yOff,
+            'text-anchor': 'middle', 'dominant-baseline': 'middle',
+            'font-size': 10.5, 'font-weight': '700', fill: '#2d3436' });
+          t.textContent = word;
+          g.appendChild(t);
+          yOff += 14;
+        }
+        const tu = svgEl('text', { x: CELL/2, y: yOff + 2,
+          'text-anchor': 'middle', 'dominant-baseline': 'middle',
+          'font-size': 8.5, fill: '#b2bec3' });
+        tu.textContent = `(${unit})`;
+        g.appendChild(tu);
+      } else {
+        // Scatter
+        const [xlo, xhi] = extents[col];
+        const [ylo, yhi] = extents[row];
+        const sx = v => CP + (v - xlo) / (xhi - xlo) * (CELL - 2*CP);
+        const sy = v => (CELL - CP) - (v - ylo) / (yhi - ylo) * (CELL - 2*CP);
+
+        for (const s of SAMPLES) {
+          const cx = sx(s[ACTIVE[col]]);
+          const cy = sy(s[ACTIVE[row]]);
+          const gi = s[s.length - 1];
+          g.appendChild(svgEl('circle', { cx, cy, r: 2.2,
+            fill: GP_FILL[gi % GP_FILL.length], stroke: 'none' }));
+        }
+
+        const xs = SAMPLES.map(s => s[ACTIVE[col]]);
+        const ys = SAMPLES.map(s => s[ACTIVE[row]]);
+        const r  = pearsonR(xs, ys);
+
+        const rt = svgEl('text', { x: CELL-4, y: CELL-3,
+          'text-anchor': 'end', 'dominant-baseline': 'auto',
+          'font-size': 8.5, fill: Math.abs(r) > 0.5 ? '#2d3436' : '#74b9ff',
+          'font-weight': '600' });
+        rt.textContent = `r = ${r.toFixed(2)}`;
+        g.appendChild(rt);
+      }
+
+      svg.appendChild(g);
+    }
+  }
+
+  container.innerHTML = '';
+  container.appendChild(svg);
+  bindScatterHover(svg);
+}
+
+function bindScatterHover(svg) {
+  svg.querySelectorAll('.scatter-cell').forEach(cell => {
+    cell.addEventListener('mouseenter', e => {
+      const row = +cell.dataset.row, col = +cell.dataset.col;
+      if (row !== col) setHovered(row, col);
+    });
+    cell.addEventListener('mouseleave', () => setHovered(null, null));
+  });
+}
+
+// ── Correlation heatmap ──────────────────────────────────────────────────────
+
+const HM_CELL = 44;
+const HM_LABEL = 58;
+
+function renderHeatmap() {
+  const container = document.getElementById('heatmap-container');
+  const nv = ACTIVE.length;
+  if (nv < 2) { container.innerHTML = ''; return; }
+
+  // Compute pairwise correlations
+  const corr = Array.from({length: nv}, (_, i) =>
+    Array.from({length: nv}, (_, j) => {
+      if (i === j) return 1;
+      return pearsonR(SAMPLES.map(s => s[ACTIVE[i]]), SAMPLES.map(s => s[ACTIVE[j]]));
+    })
+  );
+
+  const LW   = 100;  // gradient legend width
+  const W    = HM_LABEL + nv * HM_CELL + 14 + LW;
+  const H    = 26 + nv * HM_CELL;
+  const svg  = makeSVG(W, H);
+
+  // ── Draw gradient legend ──
+  const lgx = HM_LABEL + nv * HM_CELL + 10;
+  const lgy = 26;
+  const lgh = nv * HM_CELL;
+  const steps = 40;
+  for (let s = 0; s < steps; s++) {
+    const r = 1 - (s / (steps - 1)) * 2;
+    const y = lgy + (s / steps) * lgh;
+    const h = lgh / steps + 1;
+    svg.appendChild(svgEl('rect', { x: lgx, y, width: 10, height: h, fill: corrColor(r) }));
+  }
+  const lgLabels = [[1, '+1'], [0, '0'], [-1, '–1']];
+  for (const [rv, txt] of lgLabels) {
+    const ly = lgy + ((1 - rv) / 2) * lgh;
+    const t = svgEl('text', { x: lgx + 13, y: ly, 'dominant-baseline': 'middle',
+      'font-size': 8, fill: '#636e72' });
+    t.textContent = txt;
+    svg.appendChild(t);
+  }
+
+  // ── Column labels (rotated) ──
+  for (let j = 0; j < nv; j++) {
+    const cx = HM_LABEL + j * HM_CELL + HM_CELL / 2;
+    const t = svgEl('text', {
+      x: cx, y: 20,
+      'text-anchor': 'end', 'dominant-baseline': 'middle',
+      'font-size': 9, fill: '#636e72',
+      transform: `rotate(-40, ${cx}, 20)`,
+    });
+    t.textContent = DS.vars[ACTIVE[j]].replace('Length','Len').replace('Depth','Dep').replace('Diameter','Diam');
+    svg.appendChild(t);
+  }
+
+  // ── Rows ──
+  for (let i = 0; i < nv; i++) {
+    const cy = 26 + i * HM_CELL + HM_CELL / 2;
+    // Row label
+    const lt = svgEl('text', { x: HM_LABEL - 5, y: cy,
+      'text-anchor': 'end', 'dominant-baseline': 'middle',
+      'font-size': 9, fill: '#636e72' });
+    lt.textContent = DS.vars[ACTIVE[i]].replace('Length','Len').replace('Depth','Dep').replace('Diameter','Diam');
+    svg.appendChild(lt);
+
+    for (let j = 0; j < nv; j++) {
+      const r  = corr[i][j];
+      const cx = HM_LABEL + j * HM_CELL;
+      const cy2 = 26 + i * HM_CELL;
+      const g = svgEl('g', { class: 'heatmap-cell', 'data-row': i, 'data-col': j,
+                              transform: `translate(${cx},${cy2})` });
+
+      g.appendChild(svgEl('rect', {
+        class: 'hm-rect', x: 0.5, y: 0.5,
+        width: HM_CELL - 1, height: HM_CELL - 1,
+        fill: corrColor(r), stroke: '#cdd1d6', 'stroke-width': 0.5, rx: 1,
+      }));
+
+      const abs = Math.abs(r);
+      const textFill = abs > 0.55 ? 'white' : '#2d3436';
+      const rt = svgEl('text', { x: HM_CELL/2, y: HM_CELL/2,
+        'text-anchor': 'middle', 'dominant-baseline': 'middle',
+        'font-size': 9, fill: textFill, 'font-weight': abs > 0.55 ? '600' : '400' });
+      rt.textContent = r.toFixed(2);
+      g.appendChild(rt);
+
+      svg.appendChild(g);
+    }
+  }
+
+  container.innerHTML = '';
+  container.appendChild(svg);
+  bindHeatmapHover(svg);
+}
+
+function bindHeatmapHover(svg) {
+  svg.querySelectorAll('.heatmap-cell').forEach(cell => {
+    cell.addEventListener('mouseenter', () => {
+      const row = +cell.dataset.row, col = +cell.dataset.col;
+      if (row !== col) setHovered(row, col);
+    });
+    cell.addEventListener('mouseleave', () => setHovered(null, null));
+  });
+}
+
+// ── Hover highlight ──────────────────────────────────────────────────────────
+
+function setHovered(row, col) {
+  document.querySelectorAll('.scatter-cell.highlighted, .heatmap-cell.highlighted')
+    .forEach(el => el.classList.remove('highlighted'));
+
+  HOVERED = (row !== null) ? { row, col } : null;
+  if (!HOVERED) return;
+
+  const pairs = [[row, col], [col, row]];
+  for (const [r, c] of pairs) {
+    const sc = document.querySelector(`.scatter-cell[data-row="${r}"][data-col="${c}"]`);
+    if (sc) sc.classList.add('highlighted');
+    const hm = document.querySelector(`.heatmap-cell[data-row="${r}"][data-col="${c}"]`);
+    if (hm) hm.classList.add('highlighted');
+  }
+}
+
+// ── PCA scatter ──────────────────────────────────────────────────────────────
+
+const PLOT_W  = 380;
+const PLOT_H  = 340;
+const PLOT_PAD = 38;
+
+function renderPCAScatter() {
+  const container = document.getElementById('pca-scatter-container');
+  if (!PCA || ACTIVE.length < 2) { container.innerHTML = ''; return; }
+
+  const { vecs, scores, varExp } = PCA;
+  const nPC = vecs.length;
+  const xpc = Math.min(X_PC, nPC - 1);
+  const ypc = Math.min(Y_PC, nPC - 1);
+
+  // Axis extents — symmetric around 0
+  let ext = 0;
+  for (const sc of scores) {
+    ext = Math.max(ext, Math.abs(sc[xpc]), Math.abs(sc[ypc]));
+  }
+  ext = ext * 1.15 || 1;
+
+  const pw = PLOT_W - 2 * PLOT_PAD;
+  const ph = PLOT_H - 2 * PLOT_PAD;
+
+  const toX = v => PLOT_PAD + (v / ext + 1) / 2 * pw;
+  const toY = v => PLOT_PAD + (1 - (v / ext + 1) / 2) * ph;
+  const ox = toX(0), oy = toY(0);
+
+  const svg = makeSVG(PLOT_W, PLOT_H);
+
+  // Grid lines
+  for (const tick of [-0.5, 0, 0.5]) {
+    const tx = toX(tick * ext);
+    const ty = toY(tick * ext);
+    svg.appendChild(svgEl('line', { x1: tx, y1: PLOT_PAD, x2: tx, y2: PLOT_H - PLOT_PAD,
+      stroke: '#e8eaf0', 'stroke-width': tick === 0 ? 1.2 : 0.6 }));
+    svg.appendChild(svgEl('line', { x1: PLOT_PAD, y1: ty, x2: PLOT_W - PLOT_PAD, y2: ty,
+      stroke: '#e8eaf0', 'stroke-width': tick === 0 ? 1.2 : 0.6 }));
+  }
+
+  // Axis border
+  svg.appendChild(svgEl('rect', { x: PLOT_PAD, y: PLOT_PAD,
+    width: pw, height: ph,
+    fill: 'none', stroke: '#cdd1d6', 'stroke-width': 0.8, rx: 3 }));
+
+  // Biplot arrows
+  const arrowScale = ext * 0.72;
+  for (let j = 0; j < ACTIVE.length; j++) {
+    const ax = toX(vecs[xpc][j] * arrowScale);
+    const ay = toY(vecs[ypc][j] * arrowScale);
+    const label = DS.vars[ACTIVE[j]].split(' ').map(w => w[0]).join('');
+    drawArrow(svg, ox, oy, ax, ay, '#e17055', label);
+  }
+
+  // Points
+  for (let i = 0; i < scores.length; i++) {
+    const cx = toX(scores[i][xpc]);
+    const cy = toY(scores[i][ypc]);
+    const gi = SAMPLES[i][SAMPLES[i].length - 1];
+    svg.appendChild(svgEl('circle', { cx, cy, r: 3.5,
+      fill: GP_FILL[gi % GP_FILL.length],
+      stroke: GP_COLORS[gi % GP_COLORS.length], 'stroke-width': 0.6 }));
+  }
+
+  // Axis labels
+  const xLabel = svgEl('text', { x: PLOT_W/2, y: PLOT_H - 4,
+    'text-anchor': 'middle', 'font-size': 10.5, fill: '#636e72', 'font-weight': '600' });
+  xLabel.textContent = `PC${xpc+1} (${(varExp[xpc]*100).toFixed(1)}% var.)`;
+  svg.appendChild(xLabel);
+
+  const yLabel = svgEl('text', {
+    x: 11, y: PLOT_H/2,
+    'text-anchor': 'middle', 'font-size': 10.5, fill: '#636e72', 'font-weight': '600',
+    transform: `rotate(-90, 11, ${PLOT_H/2})`,
+  });
+  yLabel.textContent = `PC${ypc+1} (${(varExp[ypc]*100).toFixed(1)}% var.)`;
+  svg.appendChild(yLabel);
+
+  container.innerHTML = '';
+  container.appendChild(svg);
+}
+
+// ── Variance chart ───────────────────────────────────────────────────────────
+
+const VC_W    = 340;
+const VC_BAR  = 20;
+const VC_GAP  = 5;
+const VC_LW   = 40;
+const VC_BW   = 220;
+
+function renderVarianceChart() {
+  const container = document.getElementById('variance-chart-container');
+  if (!PCA) { container.innerHTML = ''; return; }
+
+  const { varExp } = PCA;
+  const nPC = varExp.length;
+  const H = nPC * (VC_BAR + VC_GAP) + 22;
+  const svg = makeSVG(VC_W, H);
+
+  // Title
+  const tt = svgEl('text', { x: VC_LW, y: 12, 'font-size': 9, fill: '#b2bec3', 'font-weight': '600' });
+  tt.textContent = '% VARIANCE EXPLAINED';
+  svg.appendChild(tt);
+
+  for (let k = 0; k < nPC; k++) {
+    const y = 18 + k * (VC_BAR + VC_GAP);
+    const pct = varExp[k];
+    const bw  = pct * VC_BW;
+    const isX = k === Math.min(X_PC, nPC-1);
+    const isY = k === Math.min(Y_PC, nPC-1);
+    const sel = isX || isY;
+
+    // Label
+    const lt = svgEl('text', { x: VC_LW - 4, y: y + VC_BAR/2,
+      'text-anchor': 'end', 'dominant-baseline': 'middle',
+      'font-size': 9.5, fill: sel ? '#6c5ce7' : '#636e72',
+      'font-weight': sel ? '700' : '400' });
+    lt.textContent = `PC${k+1}`;
+    svg.appendChild(lt);
+
+    // Background track
+    svg.appendChild(svgEl('rect', { x: VC_LW, y, width: VC_BW, height: VC_BAR,
+      fill: '#f0f2f5', rx: 3 }));
+
+    // Bar
+    if (bw > 0) {
+      svg.appendChild(svgEl('rect', { x: VC_LW, y, width: Math.max(bw, 0), height: VC_BAR,
+        fill: sel ? '#6c5ce7' : '#b2bec3', rx: 3 }));
+    }
+
+    // Percentage label
+    const pct_txt = svgEl('text', { x: VC_LW + VC_BW + 5, y: y + VC_BAR/2,
+      'text-anchor': 'start', 'dominant-baseline': 'middle',
+      'font-size': 9.5, fill: sel ? '#6c5ce7' : '#636e72' });
+    pct_txt.textContent = `${(pct * 100).toFixed(1)}%`;
+    svg.appendChild(pct_txt);
+
+    // Selected indicator
+    if (isX) {
+      const ind = svgEl('text', { x: VC_LW + bw - 2, y: y + VC_BAR/2,
+        'text-anchor': 'end', 'dominant-baseline': 'middle',
+        'font-size': 8, fill: 'white', 'font-weight': '700' });
+      ind.textContent = 'X';
+      svg.appendChild(ind);
+    }
+    if (isY && !isX) {
+      const ind = svgEl('text', { x: VC_LW + bw - 2, y: y + VC_BAR/2,
+        'text-anchor': 'end', 'dominant-baseline': 'middle',
+        'font-size': 8, fill: 'white', 'font-weight': '700' });
+      ind.textContent = 'Y';
+      svg.appendChild(ind);
+    }
+  }
+
+  container.innerHTML = '';
+  container.appendChild(svg);
+}
+
+// ── Legend ───────────────────────────────────────────────────────────────────
+
+function renderLegend() {
+  const el = document.getElementById('pca-legend');
+  el.innerHTML = '';
+  DS.groups.forEach((name, i) => {
+    const item = document.createElement('div');
+    item.className = 'legend-item';
+    const swatch = document.createElement('div');
+    swatch.className = 'legend-swatch';
+    swatch.style.background = GP_COLORS[i % GP_COLORS.length];
+    item.appendChild(swatch);
+    item.appendChild(document.createTextNode(name));
+    el.appendChild(item);
+  });
+}
+
+// ── Variable toggles ─────────────────────────────────────────────────────────
+
+function renderToggles() {
+  const el = document.getElementById('var-toggles');
+  el.innerHTML = '';
+  DS.vars.forEach((name, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'var-toggle' + (ACTIVE.includes(i) ? ' active' : '');
+    btn.textContent = name;
+    btn.addEventListener('click', () => {
+      if (ACTIVE.includes(i)) {
+        if (ACTIVE.length <= 2) return; // keep at least 2
+        ACTIVE = ACTIVE.filter(x => x !== i);
+      } else {
+        ACTIVE = [...ACTIVE, i].sort((a, b) => a - b);
+      }
+      recompute();
+      updatePCSelectors();
+      renderAll();
+    });
+    el.appendChild(btn);
+  });
+}
+
+// ── PC dropdowns ─────────────────────────────────────────────────────────────
+
+function updatePCSelectors() {
+  const nPC = ACTIVE.length;
+  ['x-pc', 'y-pc'].forEach((id, axis) => {
+    const sel = document.getElementById(id);
+    const cur = axis === 0 ? X_PC : Y_PC;
+    sel.innerHTML = '';
+    for (let k = 0; k < nPC; k++) {
+      const opt = document.createElement('option');
+      opt.value = k;
+      opt.textContent = `PC${k+1}`;
+      sel.appendChild(opt);
+    }
+    sel.value = Math.min(cur, nPC - 1);
+  });
+  X_PC = +document.getElementById('x-pc').value;
+  Y_PC = +document.getElementById('y-pc').value;
+}
+
+// ── Dataset selector ─────────────────────────────────────────────────────────
+
+function populateDatasetSelector() {
+  const sel = document.getElementById('dataset-selector');
+  sel.innerHTML = '';
+  for (const [key, def] of Object.entries(DATASETS)) {
+    const opt = document.createElement('option');
+    opt.value = key;
+    opt.textContent = def.label;
+    sel.appendChild(opt);
+  }
+}
+
+function loadDataset(key) {
+  DS      = DATASETS[key];
+  SAMPLES = DS.generate();
+  ACTIVE  = DS.vars.map((_, i) => i);
+  X_PC    = 0;
+  Y_PC    = 1;
+  HOVERED = null;
+
+  document.getElementById('header-info').textContent =
+    `${SAMPLES.length} samples · ${DS.vars.length} variables · ${DS.groups.length} ${DS.groupLabel.toLowerCase()} groups`;
+
+  recompute();
+  renderToggles();
+  renderLegend();
+  updatePCSelectors();
+  renderAll();
+}
+
+// ── Recompute PCA ─────────────────────────────────────────────────────────────
+
+function recompute() {
+  if (ACTIVE.length < 2) { PCA = null; return; }
+  const data = SAMPLES.map(s => ACTIVE.map(i => s[i]));
+  PCA = runPCA(data);
+}
+
+// ── Render all ────────────────────────────────────────────────────────────────
+
+function renderAll() {
+  renderScatterMatrix();
+  renderHeatmap();
+  renderPCAScatter();
+  renderVarianceChart();
+  // Re-apply hover highlight if active
+  if (HOVERED) setHovered(HOVERED.row, HOVERED.col);
+}
+
+// ── Event wiring ──────────────────────────────────────────────────────────────
+
+function setupEvents() {
+  document.getElementById('dataset-selector').addEventListener('change', e => {
+    loadDataset(e.target.value);
+  });
+
+  document.getElementById('x-pc').addEventListener('change', e => {
+    X_PC = +e.target.value;
+    renderPCAScatter();
+    renderVarianceChart();
+  });
+
+  document.getElementById('y-pc').addEventListener('change', e => {
+    Y_PC = +e.target.value;
+    renderPCAScatter();
+    renderVarianceChart();
+  });
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+
+function init() {
+  populateDatasetSelector();
+  setupEvents();
+  loadDataset('iris');
+}
+
+init();
+</script>
+</body>
+</html>
