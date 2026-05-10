@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multivariate Distances – Marine Ecology</title>
+<script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', Arial, sans-serif; background: #eef2f7; color: #1a202c; min-height: 100vh; }
+
+header {
+  background: linear-gradient(135deg, #1a4a7a, #2d6cb0);
+  color: white; padding: 18px 28px;
+}
+header h1 { font-size: 1.5rem; font-weight: 700; }
+header p { margin-top: 4px; opacity: 0.82; font-size: 0.9rem; }
+
+.tabs { display: flex; background: #163d6a; padding: 0 28px; }
+.tab-btn {
+  padding: 12px 26px; border: none; background: transparent;
+  color: #90cdf4; font-size: 0.95rem; cursor: pointer;
+  border-bottom: 3px solid transparent; transition: all 0.2s;
+}
+.tab-btn:hover { color: white; }
+.tab-btn.active { color: white; border-bottom: 3px solid #63b3ed; font-weight: 600; }
+
+.tab-pane { display: none; padding: 20px 24px; }
+.tab-pane.active { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+
+.card {
+  background: white; border-radius: 10px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.08); padding: 18px;
+}
+.plot-card { flex: 1; min-width: 380px; }
+.info-col { width: 300px; display: flex; flex-direction: column; gap: 14px; flex-shrink: 0; }
+
+h2 { font-size: 1.05rem; color: #2b6cb0; margin-bottom: 12px; font-weight: 700; }
+h3 { font-size: 0.9rem; color: #4a5568; margin-bottom: 6px; font-weight: 600; }
+
+.instruction {
+  background: #fffbeb; border: 1px solid #f6e05e;
+  border-radius: 7px; padding: 10px 13px;
+  font-size: 0.87rem; color: #744210; line-height: 1.5;
+}
+
+.point-info {
+  border-radius: 7px; padding: 10px 13px; font-size: 0.87rem;
+}
+.point-a { background: #ebf8ff; border-left: 4px solid #4299e1; }
+.point-b { background: #fff5f5; border-left: 4px solid #e53e3e; margin-top: 8px; }
+.point-name { font-weight: 700; margin-bottom: 4px; color: #2d3748; }
+.point-coords { color: #4a5568; line-height: 1.7; }
+
+.formula-box {
+  background: #f0fff4; border: 1px solid #9ae6b4;
+  border-radius: 8px; padding: 13px;
+  font-family: 'Courier New', monospace; font-size: 0.83rem; line-height: 1.9;
+}
+.formula-title { font-family: 'Segoe UI', Arial, sans-serif; font-weight: 700; color: #276749; margin-bottom: 8px; font-size: 0.93rem; }
+.formula-line { color: #2d3748; }
+.formula-comment { color: #718096; margin-top: 3px; }
+.formula-result {
+  color: #22543d; font-weight: 700; font-size: 0.98rem;
+  border-top: 1px solid #9ae6b4; padding-top: 6px; margin-top: 4px;
+}
+
+.eco-note { font-size: 0.82rem; color: #4a5568; line-height: 1.7; }
+
+.reset-btn {
+  width: 100%; padding: 8px; background: #e2e8f0;
+  border: none; border-radius: 6px; cursor: pointer;
+  font-size: 0.87rem; color: #4a5568; transition: background 0.15s;
+}
+.reset-btn:hover { background: #cbd5e0; }
+
+/* SVG styles */
+.gridline { stroke: #e2e8f0; stroke-width: 1; }
+.axis-line { stroke: #a0aec0; stroke-width: 1.5; }
+.axis-label { font-size: 12px; fill: #4a5568; font-weight: 600; font-family: 'Segoe UI', Arial, sans-serif; }
+.tick-label { font-size: 11px; fill: #718096; font-family: 'Segoe UI', Arial, sans-serif; }
+.site-dot { cursor: pointer; }
+.site-dot:hover { opacity: 1 !important; }
+
+.leg-urchin { stroke: #4299e1; stroke-width: 2.5; stroke-dasharray: 6,3; fill: none; }
+.leg-kelp   { stroke: #e53e3e; stroke-width: 2.5; stroke-dasharray: 6,3; fill: none; }
+.leg-hyp    { stroke: #38a169; stroke-width: 3; fill: none; }
+.right-angle-mark { stroke: #718096; stroke-width: 1.5; fill: none; }
+
+.lbl-urchin { font-size: 11px; fill: #2b6cb0; font-weight: 700; font-family: 'Segoe UI', Arial, sans-serif; }
+.lbl-kelp   { font-size: 11px; fill: #c53030; font-weight: 700; font-family: 'Segoe UI', Arial, sans-serif; }
+.lbl-hyp    { font-size: 11px; fill: #276749; font-weight: 700; font-family: 'Segoe UI', Arial, sans-serif; }
+.site-lbl   { font-size: 10px; font-weight: 600; font-family: 'Segoe UI', Arial, sans-serif; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Multivariate Distances in Marine Ecology</h1>
+  <p>Click two survey sites to calculate the Euclidean distance between them in species space</p>
+</header>
+
+<div class="tabs">
+  <button class="tab-btn active" onclick="showTab('2d',this)">&#x1F4CA; 2D: Urchins &amp; Kelp</button>
+  <button class="tab-btn" onclick="showTab('3d',this)">&#x1F9CA; 3D: Urchins, Kelp &amp; Lobsters</button>
+</div>
+
+<!-- ══ 2D TAB ══════════════════════════════════════════════════════════════ -->
+<div id="pane-2d" class="tab-pane active">
+  <div class="card plot-card">
+    <h2>Survey Sites: Urchin vs Kelp Density</h2>
+    <svg id="svg2d" viewBox="0 0 530 430" style="width:100%;display:block;"></svg>
+  </div>
+  <div class="info-col">
+    <div class="card">
+      <div id="instr2d" class="instruction">&#x1F446; Click a survey site to select Point A</div>
+    </div>
+    <div class="card" id="sel2d-card" style="display:none">
+      <h3>Selected Sites</h3>
+      <div id="ptA2d" class="point-info point-a" style="display:none">
+        <div class="point-name">&#x1F4CD; Point A — <span id="ptA2d-name"></span></div>
+        <div class="point-coords" id="ptA2d-coords"></div>
+      </div>
+      <div id="ptB2d" class="point-info point-b" style="display:none">
+        <div class="point-name">&#x1F4CD; Point B — <span id="ptB2d-name"></span></div>
+        <div class="point-coords" id="ptB2d-coords"></div>
+      </div>
+    </div>
+    <div class="card" id="form2d-card" style="display:none">
+      <div class="formula-title">&#x1F4D0; Euclidean Distance</div>
+      <div class="formula-box" id="form2d"></div>
+    </div>
+    <div class="card" id="reset2d-card" style="display:none">
+      <button class="reset-btn" onclick="reset2d()">&#x21BA; Clear selection</button>
+    </div>
+    <div class="card">
+      <h3>Species relationships</h3>
+      <p class="eco-note">
+        &#x1F994; <b>Urchins</b> graze heavily on kelp, keeping its density low.<br>
+        &#x1F33F; <b>Kelp</b> thrives where urchin grazing pressure is low.<br>
+        &#x1F99E; <b>Lobsters</b> eat urchins &mdash; they are abundant where kelp is dense and urchins are sparse.
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- ══ 3D TAB ══════════════════════════════════════════════════════════════ -->
+<div id="pane-3d" class="tab-pane">
+  <div class="card plot-card" style="min-width:400px">
+    <h2>Survey Sites: Urchin, Kelp &amp; Lobster Density</h2>
+    <p style="font-size:0.82rem;color:#718096;margin-bottom:8px">Drag to rotate &bull; Scroll to zoom &bull; Click a site to select it</p>
+    <div id="plot3d" style="height:450px;"></div>
+  </div>
+  <div class="info-col">
+    <div class="card">
+      <div id="instr3d" class="instruction">&#x1F446; Click a survey site to select Point A</div>
+    </div>
+    <div class="card" id="sel3d-card" style="display:none">
+      <h3>Selected Sites</h3>
+      <div id="ptA3d" class="point-info point-a" style="display:none">
+        <div class="point-name">&#x1F4CD; Point A — <span id="ptA3d-name"></span></div>
+        <div class="point-coords" id="ptA3d-coords"></div>
+      </div>
+      <div id="ptB3d" class="point-info point-b" style="display:none">
+        <div class="point-name">&#x1F4CD; Point B — <span id="ptB3d-name"></span></div>
+        <div class="point-coords" id="ptB3d-coords"></div>
+      </div>
+    </div>
+    <div class="card" id="form3d-card" style="display:none">
+      <div class="formula-title">&#x1F4D0; 3D Euclidean Distance</div>
+      <div class="formula-box" id="form3d"></div>
+      <p style="font-size:0.78rem;color:#718096;margin-top:8px;line-height:1.5">
+        Coloured dashed lines show the three axis-aligned components (&#x0394;x, &#x0394;y, &#x0394;z). The green line is the direct distance.
+      </p>
+    </div>
+    <div class="card" id="reset3d-card" style="display:none">
+      <button class="reset-btn" onclick="reset3d()">&#x21BA; Clear selection</button>
+    </div>
+    <div class="card">
+      <h3>Why 3D distance?</h3>
+      <p class="eco-note">
+        Adding a third species gives a richer picture of ecological similarity. Two sites with similar urchin and kelp densities may differ greatly in lobster abundance. Euclidean distance captures all dimensions simultaneously.
+      </p>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+// Seeded pseudo-random number generator (Mulberry32) for reproducible data
+// ═══════════════════════════════════════════════════════════════════════════
+function mulberry32(seed) {
+  return function() {
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    var t = Math.imul(seed ^ seed >>> 15, seed | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+const rng = mulberry32(2024);
+
+function randnPair() {
+  const u = rng() + 1e-12, v = rng();
+  const r = Math.sqrt(-2 * Math.log(u));
+  return [r * Math.cos(2 * Math.PI * v), r * Math.sin(2 * Math.PI * v)];
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Generate correlated survey-site data
+// Correlations: urchin–kelp = –0.7, urchin–lobster = –0.5, kelp–lobster = +0.6
+// Using Cholesky decomposition of the 3×3 correlation matrix
+// ═══════════════════════════════════════════════════════════════════════════
+const L10 = -0.7;
+const L11 = Math.sqrt(1 - 0.49);                      // √0.51 ≈ 0.7141
+const L20 = -0.5;
+const L21 = (0.6 - L20 * L10) / L11;                  // (0.6 – 0.35) / 0.7141 ≈ 0.3502
+const L22 = Math.sqrt(Math.max(0, 1 - L20*L20 - L21*L21)); // ≈ 0.7921
+
+const N  = 28;
+const MU_U = 50, SD_U = 12;
+const MU_K = 62, SD_K = 15;
+const MU_L = 36, SD_L = 10;
+
+const SITE_NAMES = [
+  'Cape Reef','Seal Rock','Anchor Bay','Kelp Gardens','Urchin Flats',
+  'Lobster Cove','North Ledge','South Shoal','The Pinnacle','Mermaid Point',
+  'Rocky Head','Tidal Bench','Deep Shelf','Surge Channel','Boulder Patch',
+  'West Terrace','East Bank','Sand Dollar','Abalone Ridge','Coral Steps',
+  'Kelp Forest','Otter Point','Half Moon','The Arch','Sea Fan',
+  'Gorgonian Shelf','Twin Rocks','Barnacle Bay'
+];
+
+const sites = [];
+for (let i = 0; i < N; i++) {
+  const [z1, z2] = randnPair();
+  const [z3]     = randnPair();
+  sites.push({
+    name:    SITE_NAMES[i],
+    urchin:  +Math.max(8,  MU_U + SD_U * z1).toFixed(1),
+    kelp:    +Math.max(8,  MU_K + SD_K * (L10*z1 + L11*z2)).toFixed(1),
+    lobster: +Math.max(5,  MU_L + SD_L * (L20*z1 + L21*z2 + L22*z3)).toFixed(1)
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// State
+// ═══════════════════════════════════════════════════════════════════════════
+let sel2d = [null, null];
+let sel3d = [null, null];
+let plot3dInited = false;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Tab switching
+// ═══════════════════════════════════════════════════════════════════════════
+function showTab(id, btn) {
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('pane-' + id).classList.add('active');
+  btn.classList.add('active');
+  if (id === '3d') init3D();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 2D SVG plot
+// ═══════════════════════════════════════════════════════════════════════════
+const SVG_W = 530, SVG_H = 430;
+const ML = 68, MT = 22, MR = 20, MB = 54;
+const PW = SVG_W - ML - MR;
+const PH = SVG_H - MT - MB;
+
+function sx(v, lo, hi) { return ML + (v - lo) / (hi - lo) * PW; }
+function sy(v, lo, hi) { return MT + PH - (v - lo) / (hi - lo) * PH; }
+
+function niceTicks(lo, hi, n) {
+  const raw = (hi - lo) / n;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = [1,2,5,10].map(f => f*mag).find(f => f >= raw);
+  const ticks = [];
+  for (let t = Math.ceil(lo/step)*step; t <= hi + 1e-9; t += step) ticks.push(+t.toFixed(6));
+  return ticks;
+}
+
+let xLo, xHi, yLo, yHi;
+
+function draw2D() {
+  const us = sites.map(s => s.urchin);
+  const ks = sites.map(s => s.kelp);
+  xLo = Math.floor((Math.min(...us) - 5) / 5) * 5;
+  xHi = Math.ceil ((Math.max(...us) + 5) / 5) * 5;
+  yLo = Math.floor((Math.min(...ks) - 5) / 5) * 5;
+  yHi = Math.ceil ((Math.max(...ks) + 5) / 5) * 5;
+
+  const xTicks = niceTicks(xLo, xHi, 6);
+  const yTicks = niceTicks(yLo, yHi, 6);
+
+  let g = '';
+
+  // Plot background
+  g += `<rect x="${ML}" y="${MT}" width="${PW}" height="${PH}" fill="#f8faff" rx="4"/>`;
+
+  // Grid + ticks
+  xTicks.forEach(t => {
+    const x = sx(t, xLo, xHi);
+    g += `<line class="gridline" x1="${x}" y1="${MT}" x2="${x}" y2="${MT+PH}"/>`;
+    g += `<text class="tick-label" x="${x}" y="${MT+PH+17}" text-anchor="middle">${t}</text>`;
+  });
+  yTicks.forEach(t => {
+    const y = sy(t, yLo, yHi);
+    g += `<line class="gridline" x1="${ML}" y1="${y}" x2="${ML+PW}" y2="${y}"/>`;
+    g += `<text class="tick-label" x="${ML-8}" y="${y+4}" text-anchor="end">${t}</text>`;
+  });
+
+  // Axes
+  g += `<line class="axis-line" x1="${ML}" y1="${MT+PH}" x2="${ML+PW}" y2="${MT+PH}"/>`;
+  g += `<line class="axis-line" x1="${ML}" y1="${MT}" x2="${ML}" y2="${MT+PH}"/>`;
+
+  // Axis labels
+  g += `<text class="axis-label" x="${ML+PW/2}" y="${SVG_H-8}" text-anchor="middle">Urchin density (per 100 m²)</text>`;
+  g += `<text class="axis-label" x="14" y="${MT+PH/2}" text-anchor="middle" transform="rotate(-90,14,${MT+PH/2})">Kelp density (fronds per 100 m²)</text>`;
+
+  // ── Triangle (if both points selected) ──────────────────────────────────
+  if (sel2d[0] !== null && sel2d[1] !== null) {
+    const a = sites[sel2d[0]], b = sites[sel2d[1]];
+    const ax = sx(a.urchin, xLo, xHi), ay = sy(a.kelp, yLo, yHi);
+    const bx = sx(b.urchin, xLo, xHi), by = sy(b.kelp, yLo, yHi);
+    const cx = bx, cy = ay; // right-angle corner
+
+    // Legs
+    g += `<line class="leg-urchin" x1="${ax}" y1="${ay}" x2="${cx}" y2="${cy}"/>`;
+    g += `<line class="leg-kelp"   x1="${cx}" y1="${cy}" x2="${bx}" y2="${by}"/>`;
+    g += `<line class="leg-hyp"    x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}"/>`;
+
+    // Right-angle box at corner C
+    const boxS = 9;
+    const dxA = ax > bx ? 1 : -1; // direction from C towards A (horizontal)
+    const dyB = by > ay ? 1 : -1; // direction from C towards B (vertical, SVG y-down)
+    g += `<polyline class="right-angle-mark" points="${cx+boxS*dxA},${cy} ${cx+boxS*dxA},${cy+boxS*dyB} ${cx},${cy+boxS*dyB}"/>`;
+
+    // Delta labels
+    // Δurchin — centred on horizontal leg, above or below depending on layout
+    const hMidX = (ax + cx) / 2;
+    const hLabelY = ay + (by < ay ? 14 : -6);
+    g += `<text class="lbl-urchin" x="${hMidX}" y="${hLabelY}" text-anchor="middle">Δurchin = ${Math.abs(b.urchin-a.urchin).toFixed(1)}</text>`;
+
+    // Δkelp — beside vertical leg
+    const vMidY = (cy + by) / 2;
+    const vLabelX = bx + (ax < bx ? 12 : -12);
+    g += `<text class="lbl-kelp" x="${vLabelX}" y="${vMidY+4}" text-anchor="${ax < bx ? 'start' : 'end'}">Δkelp = ${Math.abs(b.kelp-a.kelp).toFixed(1)}</text>`;
+
+    // Distance — along hypotenuse
+    const dist = Math.sqrt((b.urchin-a.urchin)**2 + (b.kelp-a.kelp)**2);
+    const hmx = (ax+bx)/2, hmy = (ay+by)/2;
+    const angle = Math.atan2(by-ay, bx-ax) * 180 / Math.PI;
+    g += `<text class="lbl-hyp" transform="translate(${hmx},${hmy}) rotate(${angle}) translate(0,-9)" text-anchor="middle">d = ${dist.toFixed(2)}</text>`;
+  }
+
+  // ── Data points ──────────────────────────────────────────────────────────
+  sites.forEach((s, i) => {
+    const x = sx(s.urchin, xLo, xHi);
+    const y = sy(s.kelp,   yLo, yHi);
+    const isA = sel2d[0] === i, isB = sel2d[1] === i;
+    const fill   = isA ? '#4299e1' : isB ? '#e53e3e' : '#5a8fcb';
+    const stroke = isA ? '#2b6cb0' : isB ? '#c53030' : '#2c5f8a';
+    const r      = isA || isB ? 9 : 6;
+    const sw     = isA || isB ? 2.5 : 1;
+    const op     = isA || isB ? '1' : '0.75';
+
+    g += `<circle class="site-dot" cx="${x}" cy="${y}" r="${r}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}" opacity="${op}" onclick="click2d(${i})"><title>${s.name}: urchin ${s.urchin}, kelp ${s.kelp}</title></circle>`;
+
+    if (isA || isB) {
+      g += `<text class="site-lbl" x="${x}" y="${y-13}" text-anchor="middle" fill="${isA ? '#2b6cb0' : '#c53030'}">${s.name}</text>`;
+    }
+  });
+
+  // ── Legend ───────────────────────────────────────────────────────────────
+  const lx = ML + PW - 160, ly = MT + 12;
+  g += `<rect x="${lx-6}" y="${ly-2}" width="168" height="58" fill="white" rx="5" opacity="0.88" stroke="#e2e8f0" stroke-width="1"/>`;
+  g += `<line x1="${lx}" y1="${ly+9}"  x2="${lx+22}" y2="${ly+9}"  stroke="#4299e1" stroke-width="2.5" stroke-dasharray="5,3"/>`;
+  g += `<text class="tick-label" x="${lx+28}" y="${ly+13}">Δurchin component</text>`;
+  g += `<line x1="${lx}" y1="${ly+26}" x2="${lx+22}" y2="${ly+26}" stroke="#e53e3e" stroke-width="2.5" stroke-dasharray="5,3"/>`;
+  g += `<text class="tick-label" x="${lx+28}" y="${ly+30}">Δkelp component</text>`;
+  g += `<line x1="${lx}" y1="${ly+43}" x2="${lx+22}" y2="${ly+43}" stroke="#38a169" stroke-width="3"/>`;
+  g += `<text class="tick-label" x="${lx+28}" y="${ly+47}">Distance d</text>`;
+
+  document.getElementById('svg2d').innerHTML = g;
+}
+
+function click2d(i) {
+  if (sel2d[0] === null) {
+    sel2d[0] = i;
+  } else if (sel2d[1] === null && i !== sel2d[0]) {
+    sel2d[1] = i;
+  } else {
+    sel2d = [i, null];
+  }
+  update2DPanel();
+  draw2D();
+}
+
+function reset2d() {
+  sel2d = [null, null];
+  update2DPanel();
+  draw2D();
+}
+
+function update2DPanel() {
+  const a = sel2d[0] !== null ? sites[sel2d[0]] : null;
+  const b = sel2d[1] !== null ? sites[sel2d[1]] : null;
+
+  document.getElementById('instr2d').textContent =
+    !a ? '👆 Click a survey site to select Point A' :
+    !b ? '👆 Now click a second site to select Point B' :
+         '✅ Two sites selected. Click any site to restart.';
+
+  document.getElementById('sel2d-card').style.display   = a ? 'block' : 'none';
+  document.getElementById('form2d-card').style.display  = (a && b) ? 'block' : 'none';
+  document.getElementById('reset2d-card').style.display = a ? 'block' : 'none';
+
+  const ptAel = document.getElementById('ptA2d');
+  ptAel.style.display = a ? 'block' : 'none';
+  if (a) {
+    document.getElementById('ptA2d-name').textContent  = a.name;
+    document.getElementById('ptA2d-coords').innerHTML  = `🦔 Urchin: <b>${a.urchin}</b> &nbsp; 🌿 Kelp: <b>${a.kelp}</b>`;
+  }
+
+  const ptBel = document.getElementById('ptB2d');
+  ptBel.style.display = b ? 'block' : 'none';
+  if (b) {
+    document.getElementById('ptB2d-name').textContent  = b.name;
+    document.getElementById('ptB2d-coords').innerHTML  = `🦔 Urchin: <b>${b.urchin}</b> &nbsp; 🌿 Kelp: <b>${b.kelp}</b>`;
+  }
+
+  if (a && b) {
+    const du   = b.urchin - a.urchin;
+    const dk   = b.kelp   - a.kelp;
+    const dist = Math.sqrt(du*du + dk*dk);
+    document.getElementById('form2d').innerHTML =
+      `<div class="formula-line">d = &radic;[ (x&#x2082;&minus;x&#x2081;)&sup2; + (y&#x2082;&minus;y&#x2081;)&sup2; ]</div>` +
+      `<div class="formula-comment">d = &radic;[ (${b.urchin}&minus;${a.urchin})&sup2; + (${b.kelp}&minus;${a.kelp})&sup2; ]</div>` +
+      `<div class="formula-line">d = &radic;[ (${du.toFixed(1)})&sup2; + (${dk.toFixed(1)})&sup2; ]</div>` +
+      `<div class="formula-line">d = &radic;[ ${(du*du).toFixed(2)} + ${(dk*dk).toFixed(2)} ]</div>` +
+      `<div class="formula-line">d = &radic; ${(du*du + dk*dk).toFixed(2)}</div>` +
+      `<div class="formula-result">d = ${dist.toFixed(3)}</div>`;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 3D Plotly plot
+// ═══════════════════════════════════════════════════════════════════════════
+function buildBaseTrace(selA, selB) {
+  return {
+    type: 'scatter3d', mode: 'markers+text',
+    x: sites.map(s => s.urchin),
+    y: sites.map(s => s.kelp),
+    z: sites.map(s => s.lobster),
+    text: sites.map(s => s.name),
+    textposition: 'top center',
+    textfont: { size: 9, color: '#4a5568' },
+    marker: {
+      size: sites.map((_, i) => (i === selA || i === selB) ? 11 : 6),
+      color: sites.map((s, i) => {
+        if (i === selA) return '#4299e1';
+        if (i === selB) return '#e53e3e';
+        return '#5a8fcb';
+      }),
+      line:    { width: 1, color: '#2c5f8a' },
+      opacity: 0.88
+    },
+    hovertemplate: '<b>%{text}</b><br>Urchin: %{x:.1f}<br>Kelp: %{y:.1f}<br>Lobster: %{z:.1f}<extra></extra>'
+  };
+}
+
+const LAYOUT3D = {
+  margin: { l: 0, r: 0, t: 10, b: 0 },
+  scene: {
+    xaxis: { title: { text: 'Urchin density' } },
+    yaxis: { title: { text: 'Kelp density'   } },
+    zaxis: { title: { text: 'Lobster density' } }
+  },
+  showlegend: false
+};
+
+function init3D() {
+  if (plot3dInited) return;
+  plot3dInited = true;
+
+  Plotly.newPlot('plot3d', [buildBaseTrace(null, null)], LAYOUT3D, { responsive: true });
+
+  document.getElementById('plot3d').on('plotly_click', function(data) {
+    const pt = data.points[0];
+    if (pt.curveNumber !== 0) return; // ignore clicks on line traces
+    const i = pt.pointIndex;
+    if (sel3d[0] === null) {
+      sel3d[0] = i;
+    } else if (sel3d[1] === null && i !== sel3d[0]) {
+      sel3d[1] = i;
+    } else {
+      sel3d = [i, null];
+    }
+    update3D();
+  });
+}
+
+function reset3d() {
+  sel3d = [null, null];
+  update3D();
+}
+
+function update3D() {
+  const iA = sel3d[0], iB = sel3d[1];
+  const a  = iA !== null ? sites[iA] : null;
+  const b  = iB !== null ? sites[iB] : null;
+
+  document.getElementById('instr3d').textContent =
+    !a ? '👆 Click a survey site to select Point A' :
+    !b ? '👆 Now click a second site to select Point B' :
+         '✅ Two sites selected. Click any site to restart.';
+
+  document.getElementById('sel3d-card').style.display   = a ? 'block' : 'none';
+  document.getElementById('form3d-card').style.display  = (a && b) ? 'block' : 'none';
+  document.getElementById('reset3d-card').style.display = a ? 'block' : 'none';
+
+  const ptAel = document.getElementById('ptA3d');
+  ptAel.style.display = a ? 'block' : 'none';
+  if (a) {
+    document.getElementById('ptA3d-name').textContent = a.name;
+    document.getElementById('ptA3d-coords').innerHTML =
+      `🦔 Urchin: <b>${a.urchin}</b><br>🌿 Kelp: <b>${a.kelp}</b><br>🦞 Lobster: <b>${a.lobster}</b>`;
+  }
+
+  const ptBel = document.getElementById('ptB3d');
+  ptBel.style.display = b ? 'block' : 'none';
+  if (b) {
+    document.getElementById('ptB3d-name').textContent = b.name;
+    document.getElementById('ptB3d-coords').innerHTML =
+      `🦔 Urchin: <b>${b.urchin}</b><br>🌿 Kelp: <b>${b.kelp}</b><br>🦞 Lobster: <b>${b.lobster}</b>`;
+  }
+
+  const traces = [buildBaseTrace(iA, iB)];
+
+  if (a && b) {
+    const du = b.urchin  - a.urchin;
+    const dk = b.kelp    - a.kelp;
+    const dl = b.lobster - a.lobster;
+    const dist = Math.sqrt(du*du + dk*dk + dl*dl);
+
+    document.getElementById('form3d').innerHTML =
+      `<div class="formula-line">d = &radic;[ (x&#x2082;&minus;x&#x2081;)&sup2; + (y&#x2082;&minus;y&#x2081;)&sup2; + (z&#x2082;&minus;z&#x2081;)&sup2; ]</div>` +
+      `<div class="formula-comment">d = &radic;[ (${b.urchin}&minus;${a.urchin})&sup2; + (${b.kelp}&minus;${a.kelp})&sup2; + (${b.lobster}&minus;${a.lobster})&sup2; ]</div>` +
+      `<div class="formula-line">d = &radic;[ (${du.toFixed(1)})&sup2; + (${dk.toFixed(1)})&sup2; + (${dl.toFixed(1)})&sup2; ]</div>` +
+      `<div class="formula-line">d = &radic;[ ${(du*du).toFixed(2)} + ${(dk*dk).toFixed(2)} + ${(dl*dl).toFixed(2)} ]</div>` +
+      `<div class="formula-line">d = &radic; ${(du*du + dk*dk + dl*dl).toFixed(2)}</div>` +
+      `<div class="formula-result">d = ${dist.toFixed(3)}</div>`;
+
+    // Stair-step path: A → (Bx,Ay,Az) → (Bx,By,Az) → B
+    // shows the three orthogonal components
+    const x1 = a.urchin,  y1 = a.kelp,  z1 = a.lobster;
+    const x2 = b.urchin,  y2 = b.kelp,  z2 = b.lobster;
+
+    // Δurchin leg (blue, along x)
+    traces.push({
+      type: 'scatter3d', mode: 'lines', name: 'Δurchin',
+      x: [x1, x2], y: [y1, y1], z: [z1, z1],
+      line: { color: '#4299e1', width: 6, dash: 'dash' },
+      hoverinfo: 'skip', showlegend: false
+    });
+    // Δkelp leg (red, along y)
+    traces.push({
+      type: 'scatter3d', mode: 'lines', name: 'Δkelp',
+      x: [x2, x2], y: [y1, y2], z: [z1, z1],
+      line: { color: '#e53e3e', width: 6, dash: 'dash' },
+      hoverinfo: 'skip', showlegend: false
+    });
+    // Δlobster leg (orange, along z)
+    traces.push({
+      type: 'scatter3d', mode: 'lines', name: 'Δlobster',
+      x: [x2, x2], y: [y2, y2], z: [z1, z2],
+      line: { color: '#ed8936', width: 6, dash: 'dash' },
+      hoverinfo: 'skip', showlegend: false
+    });
+    // Direct distance (green)
+    traces.push({
+      type: 'scatter3d', mode: 'lines', name: 'distance',
+      x: [x1, x2], y: [y1, y2], z: [z1, z2],
+      line: { color: '#38a169', width: 6 },
+      hoverinfo: 'skip', showlegend: false
+    });
+  }
+
+  Plotly.react('plot3d', traces, LAYOUT3D);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Init
+// ═══════════════════════════════════════════════════════════════════════════
+draw2D();
+</script>
+</body>
+</html>
