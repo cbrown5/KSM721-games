@@ -81,6 +81,16 @@ h3 { font-size: 0.9rem; color: #4a5568; margin-bottom: 6px; font-weight: 600; }
 .lbl-kelp   { font-size: 11px; fill: #c53030; font-weight: 700; font-family: 'Segoe UI', Arial, sans-serif; }
 .lbl-hyp    { font-size: 11px; fill: #276749; font-weight: 700; font-family: 'Segoe UI', Arial, sans-serif; }
 .site-lbl   { font-size: 10px; font-weight: 600; font-family: 'Segoe UI', Arial, sans-serif; }
+
+/* Distance matrix */
+.dist-table { border-collapse: collapse; font-size: 0.78rem; width: 100%; }
+.dist-table th, .dist-table td { padding: 5px 6px; text-align: center; border: 1px solid #e2e8f0; }
+.dist-table th { background: #ebf8ff; color: #2b6cb0; font-weight: 700; font-size: 0.75rem; }
+.dist-table td.diag { background: #f0fff4; color: #276749; font-weight: 700; }
+.dist-table td.filled { background: #fef9e7; color: #744210; font-weight: 600; }
+.dist-table td.just-filled { background: #fefcbf; color: #744210; font-weight: 700; }
+.dist-table td.empty { color: #cbd5e0; }
+.matrix-note { font-size: 0.78rem; color: #718096; margin-bottom: 8px; }
 </style>
 </head>
 <body>
@@ -118,6 +128,13 @@ h3 { font-size: 0.9rem; color: #4a5568; margin-bottom: 6px; font-weight: 600; }
     <div class="card" id="reset2d-card" style="display:none">
       <button class="reset-btn" onclick="reset2d()">&#x21BA; Clear selection</button>
     </div>
+    <!-- Distance matrix -->
+    <div class="card">
+      <h3>&#x1F4CA; Site-to-Site Distance Matrix</h3>
+      <p class="matrix-note">Click pairs of sites to fill in each distance.</p>
+      <div id="dist-matrix"></div>
+      <button class="reset-btn" style="margin-top:10px" onclick="resetMatrix()">&#x21BA; Clear matrix</button>
+    </div>
     <div class="card">
       <h3>Species relationships</h3>
       <p class="eco-note">
@@ -132,65 +149,28 @@ h3 { font-size: 0.9rem; color: #4a5568; margin-bottom: 6px; font-weight: 600; }
 
 <script>
 // ═══════════════════════════════════════════════════════════════════════════
-// Seeded pseudo-random number generator (Mulberry32) for reproducible data
+// 5 survey sites with hardcoded species densities
 // ═══════════════════════════════════════════════════════════════════════════
-function mulberry32(seed) {
-  return function() {
-    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
-    var t = Math.imul(seed ^ seed >>> 15, seed | 1);
-    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
-    return ((t ^ t >>> 14) >>> 0) / 4294967296;
-  };
-}
-const rng = mulberry32(2024);
-
-function randnPair() {
-  const u = rng() + 1e-12, v = rng();
-  const r = Math.sqrt(-2 * Math.log(u));
-  return [r * Math.cos(2 * Math.PI * v), r * Math.sin(2 * Math.PI * v)];
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Generate correlated survey-site data
-// Correlations: urchin–kelp = –0.7, urchin–lobster = –0.5, kelp–lobster = +0.6
-// Using Cholesky decomposition of the 3×3 correlation matrix
-// ═══════════════════════════════════════════════════════════════════════════
-const L10 = -0.7;
-const L11 = Math.sqrt(1 - 0.49);                      // √0.51 ≈ 0.7141
-const L20 = -0.5;
-const L21 = (0.6 - L20 * L10) / L11;                  // (0.6 – 0.35) / 0.7141 ≈ 0.3502
-const L22 = Math.sqrt(Math.max(0, 1 - L20*L20 - L21*L21)); // ≈ 0.7921
-
-const N  = 28;
-const MU_U = 50, SD_U = 12;
-const MU_K = 62, SD_K = 15;
-const MU_L = 36, SD_L = 10;
-
-const SITE_NAMES = [
-  'Cape Reef','Seal Rock','Anchor Bay','Kelp Gardens','Urchin Flats',
-  'Lobster Cove','North Ledge','South Shoal','The Pinnacle','Mermaid Point',
-  'Rocky Head','Tidal Bench','Deep Shelf','Surge Channel','Boulder Patch',
-  'West Terrace','East Bank','Sand Dollar','Abalone Ridge','Coral Steps',
-  'Kelp Forest','Otter Point','Half Moon','The Arch','Sea Fan',
-  'Gorgonian Shelf','Twin Rocks','Barnacle Bay'
+const sites = [
+  { name: 'Cape Reef',    abbr: 'CR', urchin: 18, kelp: 82 },
+  { name: 'Seal Rock',    abbr: 'SR', urchin: 43, kelp: 56 },
+  { name: 'Anchor Bay',   abbr: 'AB', urchin: 67, kelp: 34 },
+  { name: 'Kelp Gardens', abbr: 'KG', urchin: 11, kelp: 91 },
+  { name: 'Urchin Flats', abbr: 'UF', urchin: 76, kelp: 19 },
 ];
 
-const sites = [];
-for (let i = 0; i < N; i++) {
-  const [z1, z2] = randnPair();
-  const [z3]     = randnPair();
-  sites.push({
-    name:    SITE_NAMES[i],
-    urchin:  +Math.max(8,  MU_U + SD_U * z1).toFixed(1),
-    kelp:    +Math.max(8,  MU_K + SD_K * (L10*z1 + L11*z2)).toFixed(1),
-    lobster: +Math.max(5,  MU_L + SD_L * (L20*z1 + L21*z2 + L22*z3)).toFixed(1)
-  });
-}
+const N = sites.length;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // State
 // ═══════════════════════════════════════════════════════════════════════════
 let sel2d = [null, null];
+
+// distMatrix[i][j] = calculated distance, or null if not yet calculated
+const distMatrix = Array.from({ length: N }, () => Array(N).fill(null));
+
+// Track the most recently filled cell for highlighting
+let lastFilled = null;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 2D SVG plot
@@ -217,10 +197,10 @@ let xLo, xHi, yLo, yHi;
 function draw2D() {
   const us = sites.map(s => s.urchin);
   const ks = sites.map(s => s.kelp);
-  xLo = Math.floor((Math.min(...us) - 5) / 5) * 5;
-  xHi = Math.ceil ((Math.max(...us) + 5) / 5) * 5;
-  yLo = Math.floor((Math.min(...ks) - 5) / 5) * 5;
-  yHi = Math.ceil ((Math.max(...ks) + 5) / 5) * 5;
+  xLo = Math.floor((Math.min(...us) - 10) / 10) * 10;
+  xHi = Math.ceil ((Math.max(...us) + 10) / 10) * 10;
+  yLo = Math.floor((Math.min(...ks) - 10) / 10) * 10;
+  yHi = Math.ceil ((Math.max(...ks) + 10) / 10) * 10;
 
   const xTicks = niceTicks(xLo, xHi, 6);
   const yTicks = niceTicks(yLo, yHi, 6);
@@ -255,31 +235,25 @@ function draw2D() {
     const a = sites[sel2d[0]], b = sites[sel2d[1]];
     const ax = sx(a.urchin, xLo, xHi), ay = sy(a.kelp, yLo, yHi);
     const bx = sx(b.urchin, xLo, xHi), by = sy(b.kelp, yLo, yHi);
-    const cx = bx, cy = ay; // right-angle corner
+    const cx = bx, cy = ay;
 
-    // Legs
     g += `<line class="leg-urchin" x1="${ax}" y1="${ay}" x2="${cx}" y2="${cy}"/>`;
     g += `<line class="leg-kelp"   x1="${cx}" y1="${cy}" x2="${bx}" y2="${by}"/>`;
     g += `<line class="leg-hyp"    x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}"/>`;
 
-    // Right-angle box at corner C
     const boxS = 9;
-    const dxA = ax > bx ? 1 : -1; // direction from C towards A (horizontal)
-    const dyB = by > ay ? 1 : -1; // direction from C towards B (vertical, SVG y-down)
+    const dxA = ax > bx ? 1 : -1;
+    const dyB = by > ay ? 1 : -1;
     g += `<polyline class="right-angle-mark" points="${cx+boxS*dxA},${cy} ${cx+boxS*dxA},${cy+boxS*dyB} ${cx},${cy+boxS*dyB}"/>`;
 
-    // Delta labels
-    // Δurchin — centred on horizontal leg, above or below depending on layout
     const hMidX = (ax + cx) / 2;
     const hLabelY = ay + (by < ay ? 14 : -6);
     g += `<text class="lbl-urchin" x="${hMidX}" y="${hLabelY}" text-anchor="middle">Δurchin = ${Math.abs(b.urchin-a.urchin).toFixed(1)}</text>`;
 
-    // Δkelp — beside vertical leg
     const vMidY = (cy + by) / 2;
     const vLabelX = bx + (ax < bx ? 12 : -12);
     g += `<text class="lbl-kelp" x="${vLabelX}" y="${vMidY+4}" text-anchor="${ax < bx ? 'start' : 'end'}">Δkelp = ${Math.abs(b.kelp-a.kelp).toFixed(1)}</text>`;
 
-    // Distance — along hypotenuse
     const dist = Math.sqrt((b.urchin-a.urchin)**2 + (b.kelp-a.kelp)**2);
     const hmx = (ax+bx)/2, hmy = (ay+by)/2;
     const angle = Math.atan2(by-ay, bx-ax) * 180 / Math.PI;
@@ -293,15 +267,12 @@ function draw2D() {
     const isA = sel2d[0] === i, isB = sel2d[1] === i;
     const fill   = isA ? '#4299e1' : isB ? '#e53e3e' : '#5a8fcb';
     const stroke = isA ? '#2b6cb0' : isB ? '#c53030' : '#2c5f8a';
-    const r      = isA || isB ? 9 : 6;
-    const sw     = isA || isB ? 2.5 : 1;
-    const op     = isA || isB ? '1' : '0.75';
+    const r      = isA || isB ? 9 : 7;
+    const sw     = isA || isB ? 2.5 : 1.5;
+    const op     = isA || isB ? '1' : '0.85';
 
     g += `<circle class="site-dot" cx="${x}" cy="${y}" r="${r}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}" opacity="${op}" onclick="click2d(${i})"><title>${s.name}: urchin ${s.urchin}, kelp ${s.kelp}</title></circle>`;
-
-    if (isA || isB) {
-      g += `<text class="site-lbl" x="${x}" y="${y-13}" text-anchor="middle" fill="${isA ? '#2b6cb0' : '#c53030'}">${s.name}</text>`;
-    }
+    g += `<text class="site-lbl" x="${x}" y="${y-(r+5)}" text-anchor="middle" fill="${isA ? '#2b6cb0' : isB ? '#c53030' : '#2c5f8a'}">${s.name}</text>`;
   });
 
   // ── Legend ───────────────────────────────────────────────────────────────
@@ -324,6 +295,7 @@ function click2d(i) {
     sel2d[1] = i;
   } else {
     sel2d = [i, null];
+    lastFilled = null;
   }
   update2DPanel();
   draw2D();
@@ -331,8 +303,17 @@ function click2d(i) {
 
 function reset2d() {
   sel2d = [null, null];
+  lastFilled = null;
   update2DPanel();
   draw2D();
+}
+
+function resetMatrix() {
+  for (let i = 0; i < N; i++)
+    for (let j = 0; j < N; j++)
+      distMatrix[i][j] = null;
+  lastFilled = null;
+  renderMatrix();
 }
 
 function update2DPanel() {
@@ -363,24 +344,56 @@ function update2DPanel() {
   }
 
   if (a && b) {
+    const iA = sel2d[0], iB = sel2d[1];
     const du   = b.urchin - a.urchin;
     const dk   = b.kelp   - a.kelp;
     const dist = Math.sqrt(du*du + dk*dk);
+
     document.getElementById('form2d').innerHTML =
       `<div class="formula-line">d = &radic;[ (x&#x2082;&minus;x&#x2081;)&sup2; + (y&#x2082;&minus;y&#x2081;)&sup2; ]</div>` +
       `<div class="formula-comment">d = &radic;[ (${b.urchin}&minus;${a.urchin})&sup2; + (${b.kelp}&minus;${a.kelp})&sup2; ]</div>` +
       `<div class="formula-line">d = &radic;[ (${du.toFixed(1)})&sup2; + (${dk.toFixed(1)})&sup2; ]</div>` +
       `<div class="formula-line">d = &radic;[ ${(du*du).toFixed(2)} + ${(dk*dk).toFixed(2)} ]</div>` +
       `<div class="formula-line">d = &radic; ${(du*du + dk*dk).toFixed(2)}</div>` +
-      `<div class="formula-result">d = ${dist.toFixed(3)}</div>`;
+      `<div class="formula-result">d = ${dist.toFixed(2)}</div>`;
+
+    // Fill both symmetric cells in the matrix
+    distMatrix[iA][iB] = dist;
+    distMatrix[iB][iA] = dist;
+    lastFilled = [iA, iB];
+    renderMatrix();
   }
 }
 
+function renderMatrix() {
+  const lf = lastFilled;
+  let html = '<table class="dist-table"><thead><tr><th></th>';
+  sites.forEach(s => { html += `<th title="${s.name}">${s.abbr}</th>`; });
+  html += '</tr></thead><tbody>';
+
+  for (let i = 0; i < N; i++) {
+    html += `<tr><th title="${sites[i].name}">${sites[i].abbr}</th>`;
+    for (let j = 0; j < N; j++) {
+      if (i === j) {
+        html += `<td class="diag">0</td>`;
+      } else if (distMatrix[i][j] !== null) {
+        const isNew = lf && ((i === lf[0] && j === lf[1]) || (i === lf[1] && j === lf[0]));
+        html += `<td class="${isNew ? 'just-filled' : 'filled'}">${distMatrix[i][j].toFixed(1)}</td>`;
+      } else {
+        html += `<td class="empty">–</td>`;
+      }
+    }
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  document.getElementById('dist-matrix').innerHTML = html;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Init
 // ═══════════════════════════════════════════════════════════════════════════
 draw2D();
+renderMatrix();
 </script>
 </body>
 </html>
