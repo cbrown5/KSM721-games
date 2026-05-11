@@ -248,7 +248,6 @@ for (let i = 0; i < N; i++) {
 let sel2d = [null, null];
 let sel3d = [null, null];
 let plot3dInited = false;
-let plot3dUpdating = false;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Tab switching
@@ -488,7 +487,6 @@ function init3D() {
   Plotly.newPlot('plot3d', [buildBaseTrace(null, null)], LAYOUT3D, { responsive: true });
 
   document.getElementById('plot3d').on('plotly_click', function(data) {
-    if (plot3dUpdating) return;
     const pt = data.points[0];
     if (pt.curveNumber !== 0) return; // ignore clicks on line traces
     const i = pt.pointIndex;
@@ -538,7 +536,20 @@ function update3D() {
       `🦔 Urchin: <b>${b.urchin}</b><br>🌿 Kelp: <b>${b.kelp}</b><br>🦞 Lobster: <b>${b.lobster}</b>`;
   }
 
-  const traces = [buildBaseTrace(iA, iB)];
+  // Update marker colours/sizes on the base scatter trace without replacing it.
+  // Using restyle + addTraces/deleteTraces avoids Plotly.react() which can
+  // re-fire plotly_click and cause an infinite loop.
+  Plotly.restyle('plot3d', {
+    'marker.size':  [sites.map((_, i) => (i === iA || i === iB) ? 11 : 6)],
+    'marker.color': [sites.map((_, i) => i === iA ? '#4299e1' : i === iB ? '#e53e3e' : '#5a8fcb')]
+  }, [0]);
+
+  // Remove any existing line traces (indices 1+).
+  const el = document.getElementById('plot3d');
+  const existingCount = el.data ? el.data.length : 1;
+  const deletePromise = existingCount > 1
+    ? Plotly.deleteTraces('plot3d', Array.from({length: existingCount - 1}, (_, i) => i + 1))
+    : Promise.resolve();
 
   if (a && b) {
     const du = b.urchin  - a.urchin;
@@ -554,43 +565,20 @@ function update3D() {
       `<div class="formula-line">d = &radic; ${(du*du + dk*dk + dl*dl).toFixed(2)}</div>` +
       `<div class="formula-result">d = ${dist.toFixed(3)}</div>`;
 
-    // Stair-step path: A → (Bx,Ay,Az) → (Bx,By,Az) → B
-    // shows the three orthogonal components
     const x1 = a.urchin,  y1 = a.kelp,  z1 = a.lobster;
     const x2 = b.urchin,  y2 = b.kelp,  z2 = b.lobster;
-
-    // Δurchin leg (blue, along x)
-    traces.push({
-      type: 'scatter3d', mode: 'lines', name: 'Δurchin',
-      x: [x1, x2], y: [y1, y1], z: [z1, z1],
-      line: { color: '#4299e1', width: 6, dash: 'dash' },
-      hoverinfo: 'skip', showlegend: false
-    });
-    // Δkelp leg (red, along y)
-    traces.push({
-      type: 'scatter3d', mode: 'lines', name: 'Δkelp',
-      x: [x2, x2], y: [y1, y2], z: [z1, z1],
-      line: { color: '#e53e3e', width: 6, dash: 'dash' },
-      hoverinfo: 'skip', showlegend: false
-    });
-    // Δlobster leg (orange, along z)
-    traces.push({
-      type: 'scatter3d', mode: 'lines', name: 'Δlobster',
-      x: [x2, x2], y: [y2, y2], z: [z1, z2],
-      line: { color: '#ed8936', width: 6, dash: 'dash' },
-      hoverinfo: 'skip', showlegend: false
-    });
-    // Direct distance (green)
-    traces.push({
-      type: 'scatter3d', mode: 'lines', name: 'distance',
-      x: [x1, x2], y: [y1, y2], z: [z1, z2],
-      line: { color: '#38a169', width: 6 },
-      hoverinfo: 'skip', showlegend: false
-    });
+    const lineTraces = [
+      { type:'scatter3d', mode:'lines', x:[x1,x2], y:[y1,y1], z:[z1,z1],
+        line:{color:'#4299e1',width:6,dash:'dash'}, hoverinfo:'skip', showlegend:false },
+      { type:'scatter3d', mode:'lines', x:[x2,x2], y:[y1,y2], z:[z1,z1],
+        line:{color:'#e53e3e',width:6,dash:'dash'}, hoverinfo:'skip', showlegend:false },
+      { type:'scatter3d', mode:'lines', x:[x2,x2], y:[y2,y2], z:[z1,z2],
+        line:{color:'#ed8936',width:6,dash:'dash'}, hoverinfo:'skip', showlegend:false },
+      { type:'scatter3d', mode:'lines', x:[x1,x2], y:[y1,y2], z:[z1,z2],
+        line:{color:'#38a169',width:6}, hoverinfo:'skip', showlegend:false }
+    ];
+    deletePromise.then(() => Plotly.addTraces('plot3d', lineTraces));
   }
-
-  plot3dUpdating = true;
-  Plotly.react('plot3d', traces, LAYOUT3D).then(() => { plot3dUpdating = false; });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
