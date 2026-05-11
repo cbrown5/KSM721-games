@@ -248,6 +248,7 @@ for (let i = 0; i < N; i++) {
 let sel2d = [null, null];
 let sel3d = [null, null];
 let plot3dInited = false;
+let plot3dUpdating = false;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Tab switching
@@ -487,6 +488,7 @@ function init3D() {
   Plotly.newPlot('plot3d', [buildBaseTrace(null, null)], LAYOUT3D, { responsive: true });
 
   document.getElementById('plot3d').on('plotly_click', function(data) {
+    if (plot3dUpdating) return;
     const pt = data.points[0];
     if (pt.curveNumber !== 0) return; // ignore clicks on line traces
     const i = pt.pointIndex;
@@ -587,7 +589,8 @@ function update3D() {
     });
   }
 
-  Plotly.react('plot3d', traces, LAYOUT3D);
+  plot3dUpdating = true;
+  Plotly.react('plot3d', traces, LAYOUT3D).then(() => { plot3dUpdating = false; });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
