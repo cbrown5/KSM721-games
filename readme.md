@@ -9,3 +9,6 @@ Looks at how changing a mean affects the model's likelihood, in this case the mo
 
 Looks at how changing a slope and intercept affect the likelihood of a regression given a sample. 
 
+[Multivariate distances](multivariate-distance/multivariate_distance.html)
+
+Calculate distance in 2D (urchins ) to complete a distance matrix. 
