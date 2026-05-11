@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Multivariate Distances – Marine Ecology</title>
-<script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: 'Segoe UI', Arial, sans-serif; background: #eef2f7; color: #1a202c; min-height: 100vh; }
@@ -15,15 +14,6 @@ header {
 }
 header h1 { font-size: 1.5rem; font-weight: 700; }
 header p { margin-top: 4px; opacity: 0.82; font-size: 0.9rem; }
-
-.tabs { display: flex; background: #163d6a; padding: 0 28px; }
-.tab-btn {
-  padding: 12px 26px; border: none; background: transparent;
-  color: #90cdf4; font-size: 0.95rem; cursor: pointer;
-  border-bottom: 3px solid transparent; transition: all 0.2s;
-}
-.tab-btn:hover { color: white; }
-.tab-btn.active { color: white; border-bottom: 3px solid #63b3ed; font-weight: 600; }
 
 .tab-pane { display: none; padding: 20px 24px; }
 .tab-pane.active { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
@@ -100,12 +90,7 @@ h3 { font-size: 0.9rem; color: #4a5568; margin-bottom: 6px; font-weight: 600; }
   <p>Click two survey sites to calculate the Euclidean distance between them in species space</p>
 </header>
 
-<div class="tabs">
-  <button class="tab-btn active" onclick="showTab('2d',this)">&#x1F4CA; 2D: Urchins &amp; Kelp</button>
-  <button class="tab-btn" onclick="showTab('3d',this)">&#x1F9CA; 3D: Urchins, Kelp &amp; Lobsters</button>
-</div>
-
-<!-- ══ 2D TAB ══════════════════════════════════════════════════════════════ -->
+<!-- ══ 2D ══════════════════════════════════════════════════════════════════ -->
 <div id="pane-2d" class="tab-pane active">
   <div class="card plot-card">
     <h2>Survey Sites: Urchin vs Kelp Density</h2>
@@ -144,46 +129,6 @@ h3 { font-size: 0.9rem; color: #4a5568; margin-bottom: 6px; font-weight: 600; }
   </div>
 </div>
 
-<!-- ══ 3D TAB ══════════════════════════════════════════════════════════════ -->
-<div id="pane-3d" class="tab-pane">
-  <div class="card plot-card" style="min-width:400px">
-    <h2>Survey Sites: Urchin, Kelp &amp; Lobster Density</h2>
-    <p style="font-size:0.82rem;color:#718096;margin-bottom:8px">Drag to rotate &bull; Scroll to zoom &bull; Click a site to select it</p>
-    <div id="plot3d" style="height:450px;"></div>
-  </div>
-  <div class="info-col">
-    <div class="card">
-      <div id="instr3d" class="instruction">&#x1F446; Click a survey site to select Point A</div>
-    </div>
-    <div class="card" id="sel3d-card" style="display:none">
-      <h3>Selected Sites</h3>
-      <div id="ptA3d" class="point-info point-a" style="display:none">
-        <div class="point-name">&#x1F4CD; Point A — <span id="ptA3d-name"></span></div>
-        <div class="point-coords" id="ptA3d-coords"></div>
-      </div>
-      <div id="ptB3d" class="point-info point-b" style="display:none">
-        <div class="point-name">&#x1F4CD; Point B — <span id="ptB3d-name"></span></div>
-        <div class="point-coords" id="ptB3d-coords"></div>
-      </div>
-    </div>
-    <div class="card" id="form3d-card" style="display:none">
-      <div class="formula-title">&#x1F4D0; 3D Euclidean Distance</div>
-      <div class="formula-box" id="form3d"></div>
-      <p style="font-size:0.78rem;color:#718096;margin-top:8px;line-height:1.5">
-        Coloured dashed lines show the three axis-aligned components (&#x0394;x, &#x0394;y, &#x0394;z). The green line is the direct distance.
-      </p>
-    </div>
-    <div class="card" id="reset3d-card" style="display:none">
-      <button class="reset-btn" onclick="reset3d()">&#x21BA; Clear selection</button>
-    </div>
-    <div class="card">
-      <h3>Why 3D distance?</h3>
-      <p class="eco-note">
-        Adding a third species gives a richer picture of ecological similarity. Two sites with similar urchin and kelp densities may differ greatly in lobster abundance. Euclidean distance captures all dimensions simultaneously.
-      </p>
-    </div>
-  </div>
-</div>
 
 <script>
 // ═══════════════════════════════════════════════════════════════════════════
@@ -246,19 +191,6 @@ for (let i = 0; i < N; i++) {
 // State
 // ═══════════════════════════════════════════════════════════════════════════
 let sel2d = [null, null];
-let sel3d = [null, null];
-let plot3dInited = false;
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Tab switching
-// ═══════════════════════════════════════════════════════════════════════════
-function showTab(id, btn) {
-  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  document.getElementById('pane-' + id).classList.add('active');
-  btn.classList.add('active');
-  if (id === '3d') init3D();
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 2D SVG plot
@@ -444,142 +376,6 @@ function update2DPanel() {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 3D Plotly plot
-// ═══════════════════════════════════════════════════════════════════════════
-function buildBaseTrace(selA, selB) {
-  return {
-    type: 'scatter3d', mode: 'markers+text',
-    x: sites.map(s => s.urchin),
-    y: sites.map(s => s.kelp),
-    z: sites.map(s => s.lobster),
-    text: sites.map(s => s.name),
-    textposition: 'top center',
-    textfont: { size: 9, color: '#4a5568' },
-    marker: {
-      size: sites.map((_, i) => (i === selA || i === selB) ? 11 : 6),
-      color: sites.map((s, i) => {
-        if (i === selA) return '#4299e1';
-        if (i === selB) return '#e53e3e';
-        return '#5a8fcb';
-      }),
-      line:    { width: 1, color: '#2c5f8a' },
-      opacity: 0.88
-    },
-    hovertemplate: '<b>%{text}</b><br>Urchin: %{x:.1f}<br>Kelp: %{y:.1f}<br>Lobster: %{z:.1f}<extra></extra>'
-  };
-}
-
-const LAYOUT3D = {
-  margin: { l: 0, r: 0, t: 10, b: 0 },
-  scene: {
-    xaxis: { title: { text: 'Urchin density' } },
-    yaxis: { title: { text: 'Kelp density'   } },
-    zaxis: { title: { text: 'Lobster density' } }
-  },
-  showlegend: false
-};
-
-function init3D() {
-  if (plot3dInited) return;
-  plot3dInited = true;
-
-  Plotly.newPlot('plot3d', [buildBaseTrace(null, null)], LAYOUT3D, { responsive: true });
-
-  document.getElementById('plot3d').on('plotly_click', function(data) {
-    const pt = data.points[0];
-    if (pt.curveNumber !== 0) return; // ignore clicks on line traces
-    const i = pt.pointIndex;
-    if (sel3d[0] === null) {
-      sel3d[0] = i;
-    } else if (sel3d[1] === null && i !== sel3d[0]) {
-      sel3d[1] = i;
-    } else {
-      sel3d = [i, null];
-    }
-    update3D();
-  });
-}
-
-function reset3d() {
-  sel3d = [null, null];
-  update3D();
-}
-
-function update3D() {
-  const iA = sel3d[0], iB = sel3d[1];
-  const a  = iA !== null ? sites[iA] : null;
-  const b  = iB !== null ? sites[iB] : null;
-
-  document.getElementById('instr3d').textContent =
-    !a ? '👆 Click a survey site to select Point A' :
-    !b ? '👆 Now click a second site to select Point B' :
-         '✅ Two sites selected. Click any site to restart.';
-
-  document.getElementById('sel3d-card').style.display   = a ? 'block' : 'none';
-  document.getElementById('form3d-card').style.display  = (a && b) ? 'block' : 'none';
-  document.getElementById('reset3d-card').style.display = a ? 'block' : 'none';
-
-  const ptAel = document.getElementById('ptA3d');
-  ptAel.style.display = a ? 'block' : 'none';
-  if (a) {
-    document.getElementById('ptA3d-name').textContent = a.name;
-    document.getElementById('ptA3d-coords').innerHTML =
-      `🦔 Urchin: <b>${a.urchin}</b><br>🌿 Kelp: <b>${a.kelp}</b><br>🦞 Lobster: <b>${a.lobster}</b>`;
-  }
-
-  const ptBel = document.getElementById('ptB3d');
-  ptBel.style.display = b ? 'block' : 'none';
-  if (b) {
-    document.getElementById('ptB3d-name').textContent = b.name;
-    document.getElementById('ptB3d-coords').innerHTML =
-      `🦔 Urchin: <b>${b.urchin}</b><br>🌿 Kelp: <b>${b.kelp}</b><br>🦞 Lobster: <b>${b.lobster}</b>`;
-  }
-
-  // Update marker colours/sizes on the base scatter trace without replacing it.
-  // Using restyle + addTraces/deleteTraces avoids Plotly.react() which can
-  // re-fire plotly_click and cause an infinite loop.
-  Plotly.restyle('plot3d', {
-    'marker.size':  [sites.map((_, i) => (i === iA || i === iB) ? 11 : 6)],
-    'marker.color': [sites.map((_, i) => i === iA ? '#4299e1' : i === iB ? '#e53e3e' : '#5a8fcb')]
-  }, [0]);
-
-  // Remove any existing line traces (indices 1+).
-  const el = document.getElementById('plot3d');
-  const existingCount = el.data ? el.data.length : 1;
-  const deletePromise = existingCount > 1
-    ? Plotly.deleteTraces('plot3d', Array.from({length: existingCount - 1}, (_, i) => i + 1))
-    : Promise.resolve();
-
-  if (a && b) {
-    const du = b.urchin  - a.urchin;
-    const dk = b.kelp    - a.kelp;
-    const dl = b.lobster - a.lobster;
-    const dist = Math.sqrt(du*du + dk*dk + dl*dl);
-
-    document.getElementById('form3d').innerHTML =
-      `<div class="formula-line">d = &radic;[ (x&#x2082;&minus;x&#x2081;)&sup2; + (y&#x2082;&minus;y&#x2081;)&sup2; + (z&#x2082;&minus;z&#x2081;)&sup2; ]</div>` +
-      `<div class="formula-comment">d = &radic;[ (${b.urchin}&minus;${a.urchin})&sup2; + (${b.kelp}&minus;${a.kelp})&sup2; + (${b.lobster}&minus;${a.lobster})&sup2; ]</div>` +
-      `<div class="formula-line">d = &radic;[ (${du.toFixed(1)})&sup2; + (${dk.toFixed(1)})&sup2; + (${dl.toFixed(1)})&sup2; ]</div>` +
-      `<div class="formula-line">d = &radic;[ ${(du*du).toFixed(2)} + ${(dk*dk).toFixed(2)} + ${(dl*dl).toFixed(2)} ]</div>` +
-      `<div class="formula-line">d = &radic; ${(du*du + dk*dk + dl*dl).toFixed(2)}</div>` +
-      `<div class="formula-result">d = ${dist.toFixed(3)}</div>`;
-
-    const x1 = a.urchin,  y1 = a.kelp,  z1 = a.lobster;
-    const x2 = b.urchin,  y2 = b.kelp,  z2 = b.lobster;
-    const lineTraces = [
-      { type:'scatter3d', mode:'lines', x:[x1,x2], y:[y1,y1], z:[z1,z1],
-        line:{color:'#4299e1',width:6,dash:'dash'}, hoverinfo:'skip', showlegend:false },
-      { type:'scatter3d', mode:'lines', x:[x2,x2], y:[y1,y2], z:[z1,z1],
-        line:{color:'#e53e3e',width:6,dash:'dash'}, hoverinfo:'skip', showlegend:false },
-      { type:'scatter3d', mode:'lines', x:[x2,x2], y:[y2,y2], z:[z1,z2],
-        line:{color:'#ed8936',width:6,dash:'dash'}, hoverinfo:'skip', showlegend:false },
-      { type:'scatter3d', mode:'lines', x:[x1,x2], y:[y1,y2], z:[z1,z2],
-        line:{color:'#38a169',width:6}, hoverinfo:'skip', showlegend:false }
-    ];
-    deletePromise.then(() => Plotly.addTraces('plot3d', lineTraces));
-  }
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Init
