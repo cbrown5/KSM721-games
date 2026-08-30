@@ -12,3 +12,7 @@ Looks at how changing a slope and intercept affect the likelihood of a regressio
 [Multivariate distances](multivariate-distance/multivariate_distance.html)
 
 Calculate distance in 2D (urchins ) to complete a distance matrix. 
+
+[Adaptive Reef](adaptive-reef/index.html)
+
+A spearfishing game where the fish population evolves in response to player hunting pressure — traits you select against become rare, traits you spare spread through the next generation.
