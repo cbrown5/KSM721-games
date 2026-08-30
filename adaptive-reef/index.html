@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Adaptive Reef</title>
+<style>
+:root{
+  --bg:#061826;
+  --panel:#0c2534;
+  --panel2:#103041;
+  --border:rgba(120,200,220,0.18);
+  --accent:#39c5c0;
+  --accent2:#f2b134;
+  --danger:#ff6b6b;
+  --good:#7ee787;
+  --text:#dff3f2;
+  --muted:#7fa8ab;
+  --mono:'Fira Code','Cascadia Code',Consolas,monospace;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:radial-gradient(ellipse at 50% -10%, #0e3345 0%, var(--bg) 55%);
+  color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  font-size:14px;
+  min-height:100vh;
+  display:flex;
+  flex-direction:column;
+  overflow-x:hidden;
+}
+button{font-family:inherit;cursor:pointer}
+
+/* ---------- HUD ---------- */
+header#hud{
+  display:flex;align-items:center;gap:18px;
+  padding:10px 18px;
+  background:linear-gradient(135deg,#0b2a3a 0%,#081b28 100%);
+  border-bottom:1px solid var(--border);
+  flex-wrap:wrap;
+}
+header#hud h1{font-size:1.15rem;color:var(--accent);letter-spacing:.02em;white-space:nowrap}
+.hud-stats{display:flex;gap:14px;flex-wrap:wrap;font-family:var(--mono);font-size:13px}
+.hud-stats span{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:4px 9px}
+.hud-stats .money{color:var(--accent2);font-weight:700}
+.hud-timer{flex:1 1 140px;min-width:120px;height:10px;background:var(--panel);border:1px solid var(--border);border-radius:6px;overflow:hidden}
+#timerBar{height:100%;width:100%;background:linear-gradient(90deg,var(--accent),var(--good));transition:width .2s linear}
+.hud-actions{display:flex;gap:8px;flex-wrap:wrap}
+.hud-actions button{
+  background:var(--panel2);color:var(--text);border:1px solid var(--border);
+  border-radius:6px;padding:7px 12px;font-size:12.5px;font-weight:600;
+  transition:background .15s;
+}
+.hud-actions button:hover{background:#154456}
+.hud-actions button.hot{color:#06222b;background:var(--accent);border-color:var(--accent)}
+.hud-actions button.hot:hover{background:#4fd8d3}
+
+/* ---------- Biome tabs ---------- */
+nav#biomeTabs{
+  display:flex;gap:6px;padding:8px 18px;background:#081c28;border-bottom:1px solid var(--border);
+  flex-wrap:wrap;
+}
+.biome-tab{
+  background:transparent;color:var(--muted);border:1px solid var(--border);
+  border-radius:16px;padding:6px 14px;font-size:12.5px;font-weight:600;
+}
+.biome-tab.active{background:var(--accent);color:#06222b;border-color:var(--accent)}
+.biome-tab .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;vertical-align:middle}
+
+/* ---------- Main ---------- */
+main{
+  flex:1;display:flex;align-items:flex-start;justify-content:center;gap:16px;
+  padding:16px;position:relative;flex-wrap:wrap;
+}
+#gameWrap{position:relative;border:1px solid var(--border);border-radius:10px;overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,.45)}
+#gc{display:block;line-height:0}
+#helpHint{
+  position:absolute;left:10px;bottom:10px;color:rgba(223,243,242,.75);
+  font-size:11.5px;background:rgba(6,20,30,.55);padding:5px 9px;border-radius:6px;pointer-events:none;
+}
+
+#sidePanel{
+  width:230px;display:flex;flex-direction:column;gap:12px;
+}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px}
+.card h3{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);margin-bottom:8px}
+.trait-row{display:flex;justify-content:space-between;align-items:center;font-size:12px;margin-bottom:6px;color:var(--muted)}
+.trait-row b{color:var(--text);font-weight:600}
+.bar{height:6px;background:#0a1c26;border-radius:3px;overflow:hidden;margin-top:2px}
+.bar i{display:block;height:100%;background:var(--accent);border-radius:3px}
+#eventFeed{display:flex;flex-direction:column;gap:6px;max-height:180px;overflow-y:auto}
+#eventFeed .ev{font-size:11.5px;color:var(--muted);border-left:2px solid var(--accent);padding:3px 8px;background:#0a1f2b;border-radius:0 4px 4px 0}
+#eventFeed .ev.rare{border-left-color:var(--accent2);color:var(--accent2)}
+
+/* ---------- Tooltip / toast ---------- */
+#tooltip{
+  position:fixed;pointer-events:none;background:#04141d;border:1px solid var(--accent);
+  border-radius:6px;padding:8px 10px;font-size:12px;line-height:1.5;z-index:60;max-width:220px;
+  box-shadow:0 4px 18px rgba(0,0,0,.5);
+}
+#tooltip b{color:var(--accent2)}
+#toastWrap{position:fixed;top:14px;right:14px;display:flex;flex-direction:column;gap:8px;z-index:70;align-items:flex-end}
+.toast{
+  background:#0c2b25;border:1px solid var(--good);color:var(--good);
+  padding:10px 14px;border-radius:8px;font-size:12.5px;max-width:300px;
+  box-shadow:0 6px 20px rgba(0,0,0,.5);animation:slidein .25s ease-out;
+}
+.toast.rare{background:#2b230c;border-color:var(--accent2);color:var(--accent2)}
+.toast.warn{background:#2b0c12;border-color:var(--danger);color:var(--danger)}
+@keyframes slidein{from{transform:translateX(30px);opacity:0}to{transform:translateX(0);opacity:1}}
+
+/* ---------- Modals ---------- */
+.modal-overlay{
+  position:fixed;inset:0;background:rgba(2,10,15,.72);display:flex;
+  align-items:center;justify-content:center;z-index:80;padding:20px;
+}
+.modal{
+  background:var(--panel);border:1px solid var(--border);border-radius:12px;
+  width:min(760px,100%);max-height:88vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.6);
+}
+.modal-head{
+  display:flex;align-items:center;justify-content:space-between;padding:14px 18px;
+  border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--panel);z-index:1;
+}
+.modal-head h2{font-size:1.05rem;color:var(--accent)}
+.modal-head button{background:none;border:none;color:var(--muted);font-size:20px;line-height:1}
+.modal-head button:hover{color:var(--text)}
+.modal-body{padding:16px 18px}
+.tabs{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap}
+.tabs button{background:var(--panel2);border:1px solid var(--border);color:var(--muted);border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600}
+.tabs button.active{background:var(--accent);color:#06222b;border-color:var(--accent)}
+.tabpane{display:none}
+.tabpane.active{display:block}
+.tabpane.shop-grid.active{display:grid}
+
+/* shop */
+.shop-grid{grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+.upgrade-card{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:10px}
+.upgrade-card h4{font-size:13px;color:var(--text);margin-bottom:4px}
+.upgrade-card p{font-size:11.5px;color:var(--muted);margin-bottom:8px;min-height:44px}
+.upgrade-card .row{display:flex;justify-content:space-between;align-items:center}
+.upgrade-card .price{font-family:var(--mono);color:var(--accent2);font-size:12.5px}
+.upgrade-card button{background:var(--accent);border:none;color:#06222b;font-weight:700;border-radius:6px;padding:6px 10px;font-size:12px}
+.upgrade-card button:disabled{background:#204049;color:var(--muted);cursor:not-allowed}
+.upgrade-card.owned{border-color:var(--good)}
+.upgrade-card.owned .price{color:var(--good)}
+
+/* journal */
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-bottom:16px}
+.stat-tile{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:10px;text-align:center}
+.stat-tile .v{font-size:1.3rem;font-weight:700;color:var(--accent);font-family:var(--mono)}
+.stat-tile .l{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-top:2px}
+.chart-block{margin-bottom:18px}
+.chart-block h4{font-size:12px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em}
+.chart-block canvas{width:100%;height:110px;background:#08202c;border-radius:6px;border:1px solid var(--border)}
+#eventLog{display:flex;flex-direction:column;gap:6px}
+#eventLog .row{font-size:12px;border-bottom:1px dashed var(--border);padding:6px 0;color:var(--muted)}
+#eventLog .row b{color:var(--text)}
+#eventLog .row.rare b{color:var(--accent2)}
+.locked-note{color:var(--muted);font-size:12.5px;background:#0a1f2b;border:1px dashed var(--border);border-radius:8px;padding:14px;text-align:center}
+
+/* generation report */
+#genReportBody .row{display:flex;justify-content:space-between;font-size:13px;padding:5px 0;border-bottom:1px dashed var(--border)}
+#genReportBody .row span:first-child{color:var(--muted)}
+.hidden{display:none!important}
+@media (max-width:860px){
+  #sidePanel{width:100%;max-width:600px}
+  main{flex-direction:column;align-items:center}
+}
+</style>
+</head>
+<body>
+<header id="hud">
+  <h1>🐟 Adaptive Reef</h1>
+  <div class="hud-stats">
+    <span class="money" id="statMoney">$0</span>
+    <span id="statGen">Gen 1</span>
+    <span id="statPop">Pop 0</span>
+    <span id="statPhase">☀ Day</span>
+  </div>
+  <div class="hud-timer"><div id="timerBar"></div></div>
+  <div class="hud-actions">
+    <button id="btnJournal">📖 Journal</button>
+    <button id="btnShop">🛒 Shop</button>
+    <button id="btnSurface" class="hot">⬆ Surface Now</button>
+    <button id="btnReset">⟲ Reset</button>
+  </div>
+</header>
+
+<nav id="biomeTabs"></nav>
+
+<main>
+  <div id="gameWrap">
+    <div id="gc"></div>
+    <div id="helpHint">Move: WASD/Arrows &nbsp;•&nbsp; Aim: mouse &nbsp;•&nbsp; Fire: click / space</div>
+  </div>
+  <div id="sidePanel">
+    <div class="card">
+      <h3 id="biomeCardTitle">Coral Reef — Population Traits</h3>
+      <div id="traitReadout"></div>
+    </div>
+    <div class="card">
+      <h3>Recent Events</h3>
+      <div id="eventFeed"><div class="ev">Welcome to the reef. Good hunting.</div></div>
+    </div>
+  </div>
+</main>
+
+<div id="tooltip" class="hidden"></div>
+<div id="toastWrap"></div>
+
+<!-- Shop Modal -->
+<div id="shopOverlay" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-head"><h2>🛒 Gear &amp; Skills</h2><button data-close="shopOverlay">✕</button></div>
+    <div class="modal-body">
+      <div class="tabs">
+        <button class="shop-tab active" data-shoptab="equipment">Equipment</button>
+        <button class="shop-tab" data-shoptab="skills">Skills</button>
+      </div>
+      <div id="shopEquipment" class="tabpane active shop-grid"></div>
+      <div id="shopSkills" class="tabpane shop-grid"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Journal Modal -->
+<div id="journalOverlay" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-head"><h2>📖 Field Journal — <span id="journalBiomeName">Coral Reef</span></h2><button data-close="journalOverlay">✕</button></div>
+    <div class="modal-body">
+      <div class="tabs">
+        <button class="journal-tab active" data-jtab="overview">Overview</button>
+        <button class="journal-tab" data-jtab="charts">Trait Charts</button>
+        <button class="journal-tab" data-jtab="events">Event Log</button>
+      </div>
+      <div id="jOverview" class="tabpane active"></div>
+      <div id="jCharts" class="tabpane"></div>
+      <div id="jEvents" class="tabpane"><div id="eventLog"></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- Generation Report Modal -->
+<div id="genReportOverlay" class="modal-overlay hidden">
+  <div class="modal" style="width:min(480px,100%)">
+    <div class="modal-head"><h2 id="genReportTitle">Generation 1 Report</h2><button data-close="genReportOverlay">✕</button></div>
+    <div class="modal-body">
+      <div id="genReportBody"></div>
+      <div style="margin-top:14px;text-align:right">
+        <button id="btnDiveAgain" class="hot" style="background:var(--accent);color:#06222b;border:none;border-radius:6px;padding:9px 16px;font-weight:700">Dive Again ▼</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
